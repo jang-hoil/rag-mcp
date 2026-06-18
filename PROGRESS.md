@@ -17,32 +17,42 @@
 - 의존성은 마일스톤별 점진 설치 (torch/sentence-transformers는 무거움).
 
 ## 마일스톤 체크리스트 (스펙 §9)
-- [x] **0. 프로젝트 뼈대** — pyproject, dirs, CLAUDE.md, PROGRESS.md, venv ✅ (커밋 e52dc91)
-- [x] **1. Qdrant 스모크 테스트** — local 모드 dense+sparse upsert→query_points RRF→fiscal_year 필터 ✅ (3 passed, 커밋 e52dc91)
-- [ ] **2. pdf_parser** — OpenDataLoader cluster+html, JSON+MD, parsed 영구저장 (테스트용 PDF 필요)
-- [ ] **3. metadata + chunking + page_render** — 표 atomic, 뭉친표 needs_image 탐지, PNG 렌더
-- [~] **4. tokenizer + sparse + embeddings** — 코드 완료(13 passed). 실제 KURE 임베딩 검증만 SSL로 보류
-- [ ] **5. vector_store + manifest** — dense+sparse upsert, payload 인덱스, 멱등성
-- [ ] **6. retrieval + reindex** — hybrid+fiscal_year 필터, reindex(reparse=False)
-- [ ] **7. server(MCP) + cli** — FastMCP 도구 노출, 통합 테스트
+- [x] **0. 프로젝트 뼈대** — pyproject, dirs, CLAUDE.md, PROGRESS.md, venv ✅
+- [x] **1. Qdrant 스모크 테스트** — dense+sparse RRF + fiscal_year 필터 ✅ (3 passed)
+- [ ] **2. pdf_parser** — OpenDataLoader cluster+html, JSON+MD, parsed 영구저장 ⏳ **샘플 PDF 대기**
+- [ ] **3. metadata + chunking + page_render** — 표 atomic, 뭉친표 needs_image, PNG 렌더 ⏳ **샘플 PDF 대기**
+- [~] **4. tokenizer + sparse + embeddings** — 코드 완료(13 passed). 실 KURE 임베딩만 SSL로 보류
+- [x] **5. vector_store + manifest** — dense+sparse upsert, IDF modifier(local 동작), 멱등성 ✅ (6 passed)
+- [x] **6. retrieval + indexer** — hybrid+fiscal_year 필터, reindex(reparse=False) ✅ (6 passed)
+- [x] **7. service + server(MCP) + cli** — FastMCP 도구 7개 등록 ✅ (9 passed)
 
-> 마일스톤 4는 스펙 순서보다 먼저 구현(PDF 불요·독립 검증 가능). tokenizer/sparse/embeddings
-> 코드와 테스트 통과. **실제 KURE 모델 임베딩만 환경 SSL 이슈로 미검증** (BLOCKERS 참조).
+> **검색·색인·MCP 파이프라인 전체 완성. 현재 44 passed, 1 skipped.**
+> 남은 것: 마일스톤 2~3(PDF→청크 파싱)만. 사용자 샘플 PDF 도착 시 끼우면 end-to-end 완성.
+> ingest_pdf 도구는 `pipeline.parse_and_chunk` 연결 지점만 비어 있음(그 외 모두 동작).
 
 ## 현재 상태 (CURRENT STATE)
-- 진행 중: **마일스톤 5 (vector_store + manifest)** 가 다음 우선순위 (PDF 불요, 스모크 자산 재사용 가능).
-- 완료: 마일스톤0+1, 기반(config/models), 마일스톤4(tokenizer/sparse/embeddings 코드). **18 passed, 1 skipped.**
-- 다음 할 일 (우선순위 순):
-  1. **vector_store.py** — Qdrant dense+sparse named vector 컬렉션 생성/upsert, payload, 각 Prefetch.filter(스모크 검증 방식).
-     sparse 컬렉션은 `models.SparseVectorParams(modifier=models.Modifier.IDF)` 시도(IDF 서버측). local 모드 IDF 동작 여부 스모크로 먼저 확인.
-  2. **manifest.py** — data/manifests/{id}.json, status parsing→parsed→embedded→done, 멱등(재실행 시 기존 포인트 삭제 후 재삽입).
-     테스트: 중간 실패 후 재실행 시 중복·orphan 없음 (FakeEmbeddingBackend로 모델 없이 검증).
-  3. **retrieval.py** — search_documents 본체(hybrid/dense/sparse + fiscal_year 필터, matched_by 산출). RRF 기본.
-  4. **pdf_parser/metadata/chunking/page_render (마일스톤 2~3)** — opendataloader-pdf 설치 + **테스트용 PDF 필요**.
-     PDF 없으면 pymupdf로 작은 표 PDF 합성해 골든 테스트 가능. 사용자에게 실제 회계지침 PDF 1개 요청 권장.
-  5. **server.py(FastMCP)+cli.py (마일스톤 7)** — §5 도구 7개 등록.
-- 참고: embeddings 실모델 테스트는 `RAG_RUN_MODEL_TESTS=1`로만 실행. vector_store/manifest/retrieval 테스트는
-  FakeEmbeddingBackend(해시 기반 결정적 벡터)로 모델 없이 검증할 것.
+- **검색/색인/MCP 파이프라인 완성. 44 passed, 1 skipped.** 남은 것은 마일스톤 2~3(PDF 파싱)뿐.
+- 다음 할 일 (사용자 샘플 PDF 도착 후, 스펙 §6.1~6.4 그대로):
+  1. `uv pip install --python .venv "opendataloader-pdf"` (JVM 래퍼, Java 21 OK).
+  2. **pdf_parser.py** — convert(format="markdown,json", table_method="cluster", markdown_with_html=True, quiet=True),
+     산출물 `data/parsed/{id}/`에 영구저장. 테스트: 정형 표(토지소유 등) 셀 골든 일치, JSON에 rows/cols/span 존재.
+  3. **metadata.py** — fiscal_year(`20\d{2}`)·doc_name·heading_path·page; is_table/has_amount/has_code 플래그.
+  4. **chunking.py** — JSON 표 격자 재구성(span 반영) → 표 atomic 청크. 본문 과목·항목 단위(긴 것만 800/overlap120).
+     뭉친표 탐지(§7.2: 한 셀에 숫자 2개+ 공백분리 등)→needs_image. 페이지 넘김 표 병합.
+  5. **page_render.py** — pymupdf `page.get_pixmap(dpi=200)` → `data/parsed/{id}/pages/p{n}.png` (needs_image 페이지만).
+  6. **pipeline.py** — `parse_and_chunk(path, doc_id, config, ...) -> (list[Chunk], meta_dict)`.
+     service.ingest_pdf가 이 함수를 import해 호출(현재 ImportError 시 안내 응답). 이거 만들면 ingest_pdf 즉시 동작.
+  7. 통합: `uv run rag-mcp ingest <pdf>` → `uv run rag-mcp search "일상경비 한도"` end-to-end 확인.
+- **실모델 검증(별도 트랙)**: 허용망에서 KURE-v1 받아 HF_HOME 캐시 반입 → `RAG_RUN_MODEL_TESTS=1` 검증.
+  그때 FakeEmbeddingBackend로 색인한 데이터는 실벡터로 재색인 필요.
+
+## 구현된 모듈 지도 (참고)
+- `config.py` 모델별 컬렉션/차원 · `models.py` Chunk/SearchResult/Manifest
+- `tokenizer.py`(코드/금액 보존)+`sparse.py`(blake2b idx, tf, IDF modifier 전제)
+- `embeddings.py`(KURE lazy) · `vector_store.py`(dense+sparse, 각 Prefetch.filter)
+- `manifest.py`(atomic·멱등) · `indexer.py`(chunks.jsonl·reindex) · `retrieval.py`(search/get_chunk)
+- `service.py`(도구 7개 로직) · `server.py`(FastMCP) · `cli.py`
+- 테스트: 모두 FakeEmbeddingBackend(`tests/conftest.py`)로 모델 없이 구동.
 
 ## 결정 로그 (DECISIONS)
 - 2026-06-18: Python 3.12 부재 → uv+3.11 채택 (torch 호환 안정).
@@ -51,4 +61,7 @@
 - 2026-06-18: payload 인덱스는 local no-op → create_payload_index는 server 모드 대비로만 호출(경고 무시).
 
 ## 막힌 것 / 미해결 (BLOCKERS)
-- (없음)
+- **샘플 PDF 대기**: 마일스톤 2~3 진행에 실제 회계지침 PDF 1개 필요. `data/` 등에 두고 경로 알려주면 진행.
+- **HF SSL 차단**: 현 환경에서 `huggingface.co` 다운로드가 SSL 자가서명 인증서 체인으로 실패
+  (스펙 §8 정부망 시나리오). KURE-v1 실모델 미검증. → 오프라인 캐시 반입 또는 인증서 설정 필요.
+  우회: 모든 테스트는 FakeEmbeddingBackend로 통과 중.
