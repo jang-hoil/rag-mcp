@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# 데이터 (색인 산출물·벡터DB — 재생성 가능)
+data/qdrant/
+data/parsed/
+data/manifests/
+*.png
+
+# 모델 캐시
+.cache/
+*.pdf
+
+# 환경
+.env
