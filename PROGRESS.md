@@ -19,32 +19,32 @@
 ## 마일스톤 체크리스트 (스펙 §9)
 - [x] **0. 프로젝트 뼈대** — pyproject, dirs, CLAUDE.md, PROGRESS.md, venv ✅
 - [x] **1. Qdrant 스모크 테스트** — dense+sparse RRF + fiscal_year 필터 ✅ (3 passed)
-- [ ] **2. pdf_parser** — OpenDataLoader cluster+html, JSON+MD, parsed 영구저장 ⏳ **샘플 PDF 대기**
-- [ ] **3. metadata + chunking + page_render** — 표 atomic, 뭉친표 needs_image, PNG 렌더 ⏳ **샘플 PDF 대기**
-- [~] **4. tokenizer + sparse + embeddings** — 코드 완료(13 passed). 실 KURE 임베딩만 SSL로 보류
+- [x] **2. pdf_parser** — OpenDataLoader cluster+html, JSON+MD, parsed 영구저장 ✅
+- [x] **3. metadata + chunking + page_render** — 표 atomic, 뭉친표 needs_image, PNG 렌더 ✅
+- [x] **4. tokenizer + sparse + embeddings** — 실 KURE 임베딩 동작 확인 ✅ (truststore로 SSL 해결)
 - [x] **5. vector_store + manifest** — dense+sparse upsert, IDF modifier(local 동작), 멱등성 ✅ (6 passed)
 - [x] **6. retrieval + indexer** — hybrid+fiscal_year 필터, reindex(reparse=False) ✅ (6 passed)
 - [x] **7. service + server(MCP) + cli** — FastMCP 도구 7개 등록 ✅ (9 passed)
 
-> **검색·색인·MCP 파이프라인 전체 완성. 현재 44 passed, 1 skipped.**
-> 남은 것: 마일스톤 2~3(PDF→청크 파싱)만. 사용자 샘플 PDF 도착 시 끼우면 end-to-end 완성.
-> ingest_pdf 도구는 `pipeline.parse_and_chunk` 연결 지점만 비어 있음(그 외 모두 동작).
+> **전 마일스톤 완료. 실제 KURE로 end-to-end 검색까지 확인. 62 passed, 1 skipped.**
 
-## 현재 상태 (CURRENT STATE)
-- **검색/색인/MCP 파이프라인 완성. 44 passed, 1 skipped.** 남은 것은 마일스톤 2~3(PDF 파싱)뿐.
-- 다음 할 일 (사용자 샘플 PDF 도착 후, 스펙 §6.1~6.4 그대로):
-  1. `uv pip install --python .venv "opendataloader-pdf"` (JVM 래퍼, Java 21 OK).
-  2. **pdf_parser.py** — convert(format="markdown,json", table_method="cluster", markdown_with_html=True, quiet=True),
-     산출물 `data/parsed/{id}/`에 영구저장. 테스트: 정형 표(토지소유 등) 셀 골든 일치, JSON에 rows/cols/span 존재.
-  3. **metadata.py** — fiscal_year(`20\d{2}`)·doc_name·heading_path·page; is_table/has_amount/has_code 플래그.
-  4. **chunking.py** — JSON 표 격자 재구성(span 반영) → 표 atomic 청크. 본문 과목·항목 단위(긴 것만 800/overlap120).
-     뭉친표 탐지(§7.2: 한 셀에 숫자 2개+ 공백분리 등)→needs_image. 페이지 넘김 표 병합.
-  5. **page_render.py** — pymupdf `page.get_pixmap(dpi=200)` → `data/parsed/{id}/pages/p{n}.png` (needs_image 페이지만).
-  6. **pipeline.py** — `parse_and_chunk(path, doc_id, config, ...) -> (list[Chunk], meta_dict)`.
-     service.ingest_pdf가 이 함수를 import해 호출(현재 ImportError 시 안내 응답). 이거 만들면 ingest_pdf 즉시 동작.
-  7. 통합: `uv run rag-mcp ingest <pdf>` → `uv run rag-mcp search "일상경비 한도"` end-to-end 확인.
-- **실모델 검증(별도 트랙)**: 허용망에서 KURE-v1 받아 HF_HOME 캐시 반입 → `RAG_RUN_MODEL_TESTS=1` 검증.
-  그때 FakeEmbeddingBackend로 색인한 데이터는 실벡터로 재색인 필요.
+## 현재 상태 (CURRENT STATE) — 2026-06-24
+- **end-to-end 완성 확인.** 실제 KURE-v1로 `예산편성_예산부서.pdf`(180 청크) 재색인 →
+  `uv run rag-mcp search "일상경비 한도"` 정상 결과(dense+sparse RRF, heading_path/page 메타 정상).
+- **SSL 차단 해결(중요):** 정부망 MITM 프록시의 self-signed 루트 CA를 Python(certifi)이 불신 →
+  **`truststore`** 로 Windows 인증서 저장소를 SSL에 주입(`truststore.inject_into_ssl()`)하면 HF 다운로드 성공.
+  - `embeddings.py._ensure_model`에 주입 코드 추가(미설치 시 무시). `pyproject.toml`에 `truststore>=0.10.0` 추가.
+  - KURE-v1 모델은 `~/.cache/huggingface/hub/models--nlpai-lab--KURE-v1`에 캐시됨.
+  - 참고: insane-search 플러그인은 "차단된 공개 웹페이지 읽기"용 → 이 SSL/모델 문제와 무관(검증 완료).
+- **Windows 콘솔 인코딩:** cli.py에 `stdout/stderr.reconfigure("utf-8")` 추가(cp949가 ∘ 등 출력 실패하던 것 해결).
+
+### ✅ 완료 (2026-06-25) — truststore SSL/UTF-8 변경 커밋됨
+1. **커밋 완료:** `embeddings.py`(truststore 주입), `pyproject.toml`+`uv.lock`(truststore 의존),
+   `cli.py`(UTF-8 출력), `AGENTS.md`(Codex 운영규칙) → 단일 커밋.
+2. **검증 재확인 OK:** `uv run rag-mcp search "201-01 일반수용비" --top-k 1` → PYTHONIOENCODING 없이
+   한글 정상 출력, dense+sparse RRF·메타데이터 정상.
+3. **pytest:** 62 passed, 1 skipped 유지 확인.
+- **별도 트랙:** `RAG_RUN_MODEL_TESTS=1` 실모델 테스트가 있으면 이제 실제로 돌릴 수 있음(모델 캐시됨).
 
 ## 구현된 모듈 지도 (참고)
 - `config.py` 모델별 컬렉션/차원 · `models.py` Chunk/SearchResult/Manifest
@@ -61,7 +61,7 @@
 - 2026-06-18: payload 인덱스는 local no-op → create_payload_index는 server 모드 대비로만 호출(경고 무시).
 
 ## 막힌 것 / 미해결 (BLOCKERS)
-- **샘플 PDF 대기**: 마일스톤 2~3 진행에 실제 회계지침 PDF 1개 필요. `data/` 등에 두고 경로 알려주면 진행.
-- **HF SSL 차단**: 현 환경에서 `huggingface.co` 다운로드가 SSL 자가서명 인증서 체인으로 실패
-  (스펙 §8 정부망 시나리오). KURE-v1 실모델 미검증. → 오프라인 캐시 반입 또는 인증서 설정 필요.
-  우회: 모든 테스트는 FakeEmbeddingBackend로 통과 중.
+- (해결됨) ~~샘플 PDF 대기~~ → `예산편성_예산부서.pdf` 처리 완료.
+- (해결됨) ~~HF SSL 차단~~ → `truststore.inject_into_ssl()`로 Windows 인증서 저장소 사용해 해결.
+  KURE-v1 캐시 완료, 실모델 end-to-end 검색 확인. (위 CURRENT STATE 참조)
+- 현재 미해결 BLOCKER 없음.

@@ -14,6 +14,13 @@ def _print(obj) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows 콘솔 기본 cp949는 한글 결과의 특수문자(∘ 등)를 출력 못 함 → UTF-8 강제.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
+
     parser = argparse.ArgumentParser(prog="rag-mcp", description="회계·예산 지침서 RAG MCP")
     sub = parser.add_subparsers(dest="cmd", required=True)
 

@@ -35,6 +35,16 @@ class _SentenceTransformerBackend(EmbeddingBackend):
 
     def _ensure_model(self):
         if self._model is None:
+            # 정부망 MITM 프록시(self-signed 인증서)에서 HF 다운로드 SSL 검증 실패 우회:
+            # Windows 인증서 저장소(프록시 루트 CA 등록됨)를 Python SSL에 주입한다.
+            # truststore 미설치 시 무시(오프라인 캐시만으로 동작 가능).
+            try:
+                import truststore
+
+                truststore.inject_into_ssl()
+            except ImportError:
+                pass
+
             from sentence_transformers import SentenceTransformer
 
             self._model = SentenceTransformer(self._hf_id)
