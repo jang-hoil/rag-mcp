@@ -44,7 +44,8 @@
 2. **검증 재확인 OK:** `uv run rag-mcp search "201-01 일반수용비" --top-k 1` → PYTHONIOENCODING 없이
    한글 정상 출력, dense+sparse RRF·메타데이터 정상.
 3. **pytest:** 62 passed, 1 skipped 유지 확인.
-- **별도 트랙:** `RAG_RUN_MODEL_TESTS=1` 실모델 테스트가 있으면 이제 실제로 돌릴 수 있음(모델 캐시됨).
+- **별도 트랙 ✅ 실행 완료(2026-06-25):** `RAG_RUN_MODEL_TESTS=1 uv run pytest tests/test_embeddings.py`
+  → 캐시된 KURE-v1로 실모델 임베딩 테스트 **3 passed**(차원 1024·query/doc 정규화 검증).
 
 ## 구현된 모듈 지도 (참고)
 - `config.py` 모델별 컬렉션/차원 · `models.py` Chunk/SearchResult/Manifest
