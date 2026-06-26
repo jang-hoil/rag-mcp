@@ -83,6 +83,14 @@ def test_reindex_idempotent_no_duplicates(store, fake_backend):
     assert store.count_by_document("doc1") == 2  # 4가 아님
 
 
+def test_local_storage_lock_friendly_error(store):
+    # store fixture가 이미 local path 락 점유 → 같은 경로 두 번째 오픈은 친절한 한국어 에러로
+    # (serve 중 CLI ingest 동시 실행 방어 — 스펙 §1.3 파일락)
+    cfg = Config()
+    with pytest.raises(RuntimeError, match="사용 중"):
+        VectorStore(cfg, embedding_model="kure")
+
+
 def test_point_id_stable():
     assert point_id_for("doc1::c0") == point_id_for("doc1::c0")
     assert point_id_for("doc1::c0") != point_id_for("doc1::c1")

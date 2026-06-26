@@ -35,7 +35,18 @@ class VectorStore:
             self.client = QdrantClient(url=config.qdrant_url)
         else:
             config.qdrant_path.mkdir(parents=True, exist_ok=True)
-            self.client = QdrantClient(path=str(config.qdrant_path))
+            try:
+                self.client = QdrantClient(path=str(config.qdrant_path))
+            except RuntimeError as e:
+                # Qdrant local은 단일 프로세스만 저장소를 열 수 있다(스펙 §1.3 파일락).
+                # serve(MCP)가 떠 있는 동안 CLI ingest 등을 동시 실행하면 여기서 막힌다.
+                if "already accessed" in str(e):
+                    raise RuntimeError(
+                        f"Qdrant local 저장소({config.qdrant_path})가 다른 프로세스에서 사용 중입니다. "
+                        "MCP serve가 실행 중이면 종료한 뒤 다시 시도하세요"
+                        "(local path 모드는 동시 접근 불가 — 동시 사용이 필요하면 server 모드 사용)."
+                    ) from e
+                raise
 
     # --- 컬렉션 ---
     def ensure_collection(self) -> None:
