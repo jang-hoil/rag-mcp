@@ -47,6 +47,18 @@
 - **별도 트랙 ✅ 실행 완료(2026-06-25):** `RAG_RUN_MODEL_TESTS=1 uv run pytest tests/test_embeddings.py`
   → 캐시된 KURE-v1로 실모델 임베딩 테스트 **3 passed**(차원 1024·query/doc 정규화 검증).
 
+### ✅ 완료 (2026-06-26) — MCP 클라이언트(Claude Desktop) 연동
+- **stdio end-to-end 검증:** mcp 1.28.0 ClientSession으로 서버 spawn →
+  `initialize`(rag-mcp) → `tools/list` **7개 노출** → `collection_status` 정상(180 points) 확인.
+  (스모크 스크립트는 scratchpad `mcp_smoke.py` — 일회성, 리포에는 미포함)
+- **Claude Desktop 등록 완료:** `%APPDATA%\Claude\claude_desktop_config.json`의 `mcpServers`에
+  `rag-mcp` 항목만 병합(기존 korean-law/opendart/archhub + preferences 12개 보존). 백업 `.bak` 생성.
+  - 형태: `command`= uv.exe **절대경로**, `args`= `["--directory","<프로젝트>","run","rag-mcp","serve"]`.
+  - 이유: GUI 앱은 셸 PATH 미상속 → 절대경로 / cwd 미보장 → `--directory` / SSL은 truststore가 처리 → env 불필요.
+  - JSON 유효성 파싱 검증 OK.
+- **가이드 문서:** 루트 `MCP_연동가이드.md` 작성(등록 절차·검증·파일락 주의·도구 7개·문제해결).
+- **남은 확인(사용자 몫):** Claude Desktop 재시작 후 도구 7개 노출·실검색 동작 육안 확인.
+
 ## 구현된 모듈 지도 (참고)
 - `config.py` 모델별 컬렉션/차원 · `models.py` Chunk/SearchResult/Manifest
 - `tokenizer.py`(코드/금액 보존)+`sparse.py`(blake2b idx, tf, IDF modifier 전제)
