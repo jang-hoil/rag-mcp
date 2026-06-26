@@ -82,11 +82,17 @@ class Indexer:
         )
         self.save_chunks(document_id, chunks)
 
-        # 멱등: 기존 포인트 삭제 후 재삽입
-        self.store.delete_document(document_id)
-        vecs = self.backend.embed_documents([c.text for c in chunks])
-        self.manifests.update(document_id, status="embedded", num_chunks=len(chunks))
-        self.store.upsert_chunks(chunks, vecs)
+        # 실패 안전: 임베딩을 먼저 수행(여기서 실패해도 기존 색인은 보존).
+        # 임베딩 성공 후에야 기존 포인트 삭제 → 재삽입(멱등). 삭제~삽입 창은 로컬 동기라 짧다.
+        try:
+            vecs = self.backend.embed_documents([c.text for c in chunks])
+            self.manifests.update(document_id, status="embedded", num_chunks=len(chunks))
+            self.store.delete_document(document_id)
+            self.store.upsert_chunks(chunks, vecs)
+        except Exception:
+            # 색인 실패를 manifest에 남겨 추적 가능하게(기존 데이터는 위에서 보존됨)
+            self.manifests.update(document_id, status="error")
+            raise
         return self.manifests.update(document_id, status="done", num_chunks=len(chunks))
 
     def reindex_document(self, document_id: str, reparse: bool = False) -> dict:

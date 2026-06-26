@@ -98,7 +98,7 @@ class DocMeta(BaseModel):
     status: str = "unknown"
 
 
-ManifestStatus = Literal["parsing", "parsed", "embedded", "done"]
+ManifestStatus = Literal["parsing", "parsed", "embedded", "done", "error"]
 
 
 class Manifest(BaseModel):

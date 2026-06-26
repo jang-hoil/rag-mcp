@@ -124,6 +124,23 @@ def test_delete_requires_confirm(svc):
     assert svc.list_documents() == []
 
 
+def test_index_embed_failure_preserves_existing(svc, monkeypatch):
+    # 재색인 중 임베딩이 실패해도 기존 색인 데이터가 사라지면 안 됨(실패 안전성)
+    svc.ingest_chunks("e1", [Chunk(chunk_id="e1::c0", document_id="e1",
+                                   text="원본 데이터 보존 확인", fiscal_year=2026)])
+    assert svc.search_documents("원본 데이터 보존 확인"), "초기 색인 실패"
+
+    def boom(texts):
+        raise RuntimeError("embed 실패 주입")
+
+    monkeypatch.setattr(svc._backend, "embed_documents", boom)
+    with pytest.raises(RuntimeError):
+        svc.ingest_chunks("e1", [Chunk(chunk_id="e1::c1", document_id="e1",
+                                       text="새 데이터", fiscal_year=2026)])
+    # 핵심: 임베딩 실패로 기존 데이터가 유실되면 안 됨
+    assert svc.search_documents("원본 데이터 보존 확인"), "임베딩 실패로 기존 데이터 유실됨!"
+
+
 def test_reindex_tool(svc):
     _seed(svc)
     res = svc.reindex_document("d1", reparse=False)
