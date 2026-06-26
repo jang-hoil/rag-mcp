@@ -93,16 +93,9 @@ class Retriever:
 
     def get_chunk(self, chunk_id: str) -> SearchResult | None:
         """chunk_id로 단건 조회 (point id는 chunk_id의 uuid5)."""
-        from .vector_store import point_id_for
-
-        if not self.store.client.collection_exists(self.store.collection):
+        rec = self.store.retrieve_chunk(chunk_id)
+        if rec is None:
             return None
-        recs = self.store.client.retrieve(
-            self.store.collection, ids=[point_id_for(chunk_id)], with_payload=True
-        )
-        if not recs:
-            return None
-        rec = recs[0]
         payload = rec.payload or {}
         source = SearchSource(
             document_id=payload.get("document_id", ""),

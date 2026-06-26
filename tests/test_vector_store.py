@@ -94,3 +94,43 @@ def test_local_storage_lock_friendly_error(store):
 def test_point_id_stable():
     assert point_id_for("doc1::c0") == point_id_for("doc1::c0")
     assert point_id_for("doc1::c0") != point_id_for("doc1::c1")
+
+
+def test_concurrent_query_during_upsert_is_safe(store, fake_backend):
+    # 배경 색인 스레드가 upsert 하는 동안 메인 스레드가 검색해도 QdrantLocal이 깨지면 안 됨.
+    # VectorStore 락이 접근을 직렬화하므로 예외 없이 동작해야 한다(비동기 ingest 전제).
+    import threading
+
+    from rag_mcp.sparse import to_sparse
+
+    _seed(store, fake_backend)  # 초기 데이터(검색이 빈 컬렉션을 만나지 않게)
+    errors = []
+    stop = threading.Event()
+
+    def writer():
+        try:
+            for i in range(20):
+                if stop.is_set():
+                    break
+                cid = f"docw::c{i}"
+                ch = _chunk(cid, f"동시성 문서 {i}", 2026, doc="docw")
+                store.upsert_chunks([ch], fake_backend.embed_documents([ch.text]))
+        except Exception as e:  # pragma: no cover - 실패 시 메시지 확인용
+            errors.append(("writer", repr(e)))
+
+    def reader():
+        try:
+            qd = fake_backend.embed_query("일반수용비")
+            qs = to_sparse("일반수용비")
+            for _ in range(40):
+                if stop.is_set():
+                    break
+                store.query(qd, qs, top_k=3, search_mode="hybrid")
+        except Exception as e:  # pragma: no cover
+            errors.append(("reader", repr(e)))
+
+    tw, tr = threading.Thread(target=writer), threading.Thread(target=reader)
+    tw.start(); tr.start()
+    tw.join(10); stop.set(); tr.join(10)
+    assert not errors, errors
+    assert store.count_by_document("docw") == 20

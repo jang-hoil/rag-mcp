@@ -1216,6 +1216,7 @@ name = "rag-mcp"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "anyio" },
     { name = "kiwipiepy" },
     { name = "langchain-text-splitters" },
     { name = "mcp" },
@@ -1234,6 +1235,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anyio", specifier = ">=4.0.0" },
     { name = "kiwipiepy", specifier = ">=0.18.0" },
     { name = "langchain-text-splitters", specifier = ">=0.3.0" },
     { name = "mcp", specifier = ">=1.2.0" },

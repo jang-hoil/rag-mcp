@@ -97,12 +97,30 @@
   `Manifest.meta` 필드 추가 + `index_chunks`가 metadata를 manifest에 보존 + reparse 시 복원.
 - 테스트 2건(source 없음 에러 / 재파싱+meta 복원), **73 passed/1 skipped**.
 
+### ✅ 완료 (2026-06-26) — ingest 비동기 job화 + 동시성 안전(타임아웃 근본 해결)
+- **증상**: 314p PDF(칠곡군) MCP `ingest_pdf` 호출이 4분 타임아웃, 뒤이은 `list_documents`도 멈춤.
+- **진단(코드 확정)**: FastMCP는 동기 `@mcp.tool()` 함수를 **이벤트 루프에서 직접 실행**
+  (`mcp/.../func_metadata.py:95` `return fn(...)`). 색인이 ~10분간 루프 점유 → 모든 도구 대기.
+  실제로 색인은 서버에서 끝까지 진행돼 **1067청크 done**(클라이언트만 포기). manifest로 확인됨.
+- **부수 발견/정리**: rag-mcp serve 프로세스 **중복 실행 2개+** → Qdrant 단일 락 충돌. 중복 종료함.
+- **수정(테스트 먼저 → 81 passed/1 skipped → 커밋)**:
+  1. `jobs.py` 신규: `JobStore`(스레드 안전), `submit_ingest`가 백그라운드 스레드로 색인 + 즉시
+     `job_id` 반환, `ingest_status`로 폴링. 동시 ingest 1개 제한.
+  2. `vector_store.py`: `threading.RLock`로 upsert/delete/query/count/status/retrieve 직렬화
+     (QdrantLocal은 thread-safe 아님 — 백그라운드 색인 ↔ 검색 동시 접근 보호). `retrieve_chunk` 추가.
+  3. `server.py`: 모든 도구를 **async + `anyio.to_thread`** 오프로딩(이벤트 루프 비점유).
+     `ingest_pdf`→`submit_ingest`, `ingest_status` 도구 추가(총 **8개**). `pyproject`에 `anyio` 직접 의존 명시.
+- **검증된 사실**: 실데이터(1247 points)로 async 서버 도구 in-process 동작 확인(list/search/status/ingest_status).
+  무거운 임베딩은 Qdrant 락을 안 잡으므로 색인 중에도 검색 거의 안 막힘.
+- **운영 메모**: CLI `ingest`는 동기 유지(별도 프로세스라 타임아웃 무관). MCP_연동가이드.md 도구 8개·비동기 워크플로우 반영.
+
 ## 구현된 모듈 지도 (참고)
 - `config.py` 모델별 컬렉션/차원 · `models.py` Chunk/SearchResult/Manifest
 - `tokenizer.py`(코드/금액 보존)+`sparse.py`(blake2b idx, tf, IDF modifier 전제)
 - `embeddings.py`(KURE lazy) · `vector_store.py`(dense+sparse, 각 Prefetch.filter)
 - `manifest.py`(atomic·멱등) · `indexer.py`(chunks.jsonl·reindex) · `retrieval.py`(search/get_chunk)
-- `service.py`(도구 7개 로직) · `server.py`(FastMCP) · `cli.py`
+- `jobs.py`(비동기 ingest job·JobStore) · `service.py`(도구 8개 로직·submit_ingest/ingest_status)
+- `server.py`(FastMCP, async+anyio.to_thread) · `cli.py`(동기 ingest 유지)
 - 테스트: 모두 FakeEmbeddingBackend(`tests/conftest.py`)로 모델 없이 구동.
 
 ## 결정 로그 (DECISIONS)

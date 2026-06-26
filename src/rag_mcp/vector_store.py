@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import threading
 import uuid
 
 from qdrant_client import QdrantClient, models
@@ -29,6 +30,10 @@ class VectorStore:
         self.embedding_model = embedding_model or config.embedding_model
         self.collection = config.collection_name(self.embedding_model)
         self.dimension = config.dimension(self.embedding_model)
+        # QdrantLocal은 thread-safe가 아니다. 비동기 ingest(백그라운드 스레드)의 upsert와
+        # 검색 요청이 같은 클라이언트를 동시 접근하면 손상될 수 있어 접근을 직렬화한다.
+        # RLock인 이유: upsert_chunks가 내부에서 ensure_collection을 호출(같은 스레드 재진입).
+        self._lock = threading.RLock()
         if client is not None:
             self.client = client
         elif config.qdrant_mode == "server" and config.qdrant_url:
@@ -50,6 +55,10 @@ class VectorStore:
 
     # --- 컬렉션 ---
     def ensure_collection(self) -> None:
+        with self._lock:
+            self._ensure_collection_locked()
+
+    def _ensure_collection_locked(self) -> None:
         if self.client.collection_exists(self.collection):
             return
         self.client.create_collection(
@@ -76,7 +85,6 @@ class VectorStore:
     def upsert_chunks(self, chunks: list[Chunk], dense_vectors: list[list[float]]) -> int:
         if len(chunks) != len(dense_vectors):
             raise ValueError("chunks와 dense_vectors 길이 불일치")
-        self.ensure_collection()
         points = []
         for chunk, dvec in zip(chunks, dense_vectors):
             idx, val = to_sparse(chunk.text)
@@ -90,20 +98,23 @@ class VectorStore:
                     payload=chunk.payload(),
                 )
             )
-        if points:
-            self.client.upsert(collection_name=self.collection, points=points)
+        with self._lock:
+            self._ensure_collection_locked()
+            if points:
+                self.client.upsert(collection_name=self.collection, points=points)
         return len(points)
 
     def delete_document(self, document_id: str) -> None:
         """문서의 모든 포인트 삭제 (멱등 재색인용)."""
-        if not self.client.collection_exists(self.collection):
-            return
-        self.client.delete(
-            collection_name=self.collection,
-            points_selector=models.Filter(
-                must=[models.FieldCondition(key="document_id", match=models.MatchValue(value=document_id))]
-            ),
-        )
+        with self._lock:
+            if not self.client.collection_exists(self.collection):
+                return
+            self.client.delete(
+                collection_name=self.collection,
+                points_selector=models.Filter(
+                    must=[models.FieldCondition(key="document_id", match=models.MatchValue(value=document_id))]
+                ),
+            )
 
     # --- 검색 ---
     def _filter(self, fiscal_year: int | None, filters: dict | None) -> models.Filter | None:
@@ -125,58 +136,70 @@ class VectorStore:
         fiscal_year: int | None = None,
         filters: dict | None = None,
     ) -> list[models.ScoredPoint]:
-        if not self.client.collection_exists(self.collection):
-            return []
         qfilter = self._filter(fiscal_year, filters)
         sparse_q = (
             models.SparseVector(indices=sparse_vec[0], values=sparse_vec[1])
             if sparse_vec is not None
             else None
         )
+        with self._lock:
+            if not self.client.collection_exists(self.collection):
+                return []
+            if search_mode == "dense":
+                return self.client.query_points(
+                    self.collection, query=dense_vec, using="dense",
+                    query_filter=qfilter, limit=top_k, with_payload=True,
+                ).points
+            if search_mode == "sparse":
+                return self.client.query_points(
+                    self.collection, query=sparse_q, using="sparse",
+                    query_filter=qfilter, limit=top_k, with_payload=True,
+                ).points
 
-        if search_mode == "dense":
+            # hybrid: prefetch + 각 Prefetch.filter + FusionQuery
+            fusion_kind = models.Fusion.DBSF if fusion == "dbsf" else models.Fusion.RRF
+            prefetch = []
+            if dense_vec is not None:
+                prefetch.append(models.Prefetch(query=dense_vec, using="dense", limit=max(20, top_k), filter=qfilter))
+            if sparse_q is not None:
+                prefetch.append(models.Prefetch(query=sparse_q, using="sparse", limit=max(30, top_k), filter=qfilter))
             return self.client.query_points(
-                self.collection, query=dense_vec, using="dense",
-                query_filter=qfilter, limit=top_k, with_payload=True,
-            ).points
-        if search_mode == "sparse":
-            return self.client.query_points(
-                self.collection, query=sparse_q, using="sparse",
-                query_filter=qfilter, limit=top_k, with_payload=True,
+                self.collection,
+                prefetch=prefetch,
+                query=models.FusionQuery(fusion=fusion_kind),
+                limit=top_k,
+                with_payload=True,
             ).points
 
-        # hybrid: prefetch + 각 Prefetch.filter + FusionQuery
-        fusion_kind = models.Fusion.DBSF if fusion == "dbsf" else models.Fusion.RRF
-        prefetch = []
-        if dense_vec is not None:
-            prefetch.append(models.Prefetch(query=dense_vec, using="dense", limit=max(20, top_k), filter=qfilter))
-        if sparse_q is not None:
-            prefetch.append(models.Prefetch(query=sparse_q, using="sparse", limit=max(30, top_k), filter=qfilter))
-        return self.client.query_points(
-            self.collection,
-            prefetch=prefetch,
-            query=models.FusionQuery(fusion=fusion_kind),
-            limit=top_k,
-            with_payload=True,
-        ).points
+    def retrieve_chunk(self, chunk_id: str):
+        """chunk_id 단건 조회 (point id는 chunk_id의 uuid5). 없으면 None."""
+        with self._lock:
+            if not self.client.collection_exists(self.collection):
+                return None
+            recs = self.client.retrieve(
+                self.collection, ids=[point_id_for(chunk_id)], with_payload=True
+            )
+        return recs[0] if recs else None
 
     def count_by_document(self, document_id: str) -> int:
-        if not self.client.collection_exists(self.collection):
-            return 0
-        res = self.client.count(
-            self.collection,
-            count_filter=models.Filter(
-                must=[models.FieldCondition(key="document_id", match=models.MatchValue(value=document_id))]
-            ),
-            exact=True,
-        )
-        return res.count
+        with self._lock:
+            if not self.client.collection_exists(self.collection):
+                return 0
+            res = self.client.count(
+                self.collection,
+                count_filter=models.Filter(
+                    must=[models.FieldCondition(key="document_id", match=models.MatchValue(value=document_id))]
+                ),
+                exact=True,
+            )
+            return res.count
 
     def status(self) -> dict:
-        exists = self.client.collection_exists(self.collection)
-        if not exists:
-            return {"collection": self.collection, "exists": False, "dimension": self.dimension}
-        info = self.client.get_collection(self.collection)
+        with self._lock:
+            exists = self.client.collection_exists(self.collection)
+            if not exists:
+                return {"collection": self.collection, "exists": False, "dimension": self.dimension}
+            info = self.client.get_collection(self.collection)
         return {
             "collection": self.collection,
             "exists": True,

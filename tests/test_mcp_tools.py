@@ -197,12 +197,39 @@ def test_ingest_pdf_missing_file(svc):
 
 
 def test_server_imports_and_registers_tools():
-    """FastMCP server가 import되고 도구 7개가 등록되는지."""
+    """FastMCP server가 import되고 도구 8개(ingest_status 포함)가 등록되는지."""
     import asyncio
     from rag_mcp import server
 
     names = {t.name for t in asyncio.run(server.mcp.list_tools())}
     assert {
-        "search_documents", "ingest_pdf", "get_chunk", "list_documents",
+        "search_documents", "ingest_pdf", "ingest_status", "get_chunk", "list_documents",
         "delete_document", "reindex_document", "collection_status",
     } <= names
+
+
+def test_server_ingest_pdf_tool_returns_job(tmp_path, monkeypatch):
+    """server.ingest_pdf 도구는 (동기 색인이 아니라) 즉시 job을 반환해야 함."""
+    import asyncio
+
+    from rag_mcp import server
+
+    os.environ["RAG_QDRANT_PATH"] = str(tmp_path / "qdrant")
+    os.environ["RAG_DATA_DIR"] = str(tmp_path)
+    try:
+        # service 싱글톤 초기화(테스트 격리)
+        server._service = None
+        pdf = tmp_path / "s.pdf"
+        pdf.write_text("dummy")
+        monkeypatch.setattr(
+            server.RagService, "ingest_pdf",
+            lambda self, path, **kw: {"ok": True, "document_id": "s", "num_chunks": 1, "status": "done"},
+        )
+        res = asyncio.run(server.ingest_pdf(str(pdf)))
+        assert res["ok"] is True
+        assert res["status"] == "running"
+        assert res["job_id"]
+    finally:
+        server._service = None
+        os.environ.pop("RAG_QDRANT_PATH", None)
+        os.environ.pop("RAG_DATA_DIR", None)
