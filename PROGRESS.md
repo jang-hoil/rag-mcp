@@ -59,6 +59,15 @@
 - **가이드 문서:** 루트 `MCP_연동가이드.md` 작성(등록 절차·검증·파일락 주의·도구 7개·문제해결).
 - **남은 확인(사용자 몫):** Claude Desktop 재시작 후 도구 7개 노출·실검색 동작 육안 확인.
 
+### ✅ 완료 (2026-06-26) — Codex 코드리뷰 1차 반영
+- **Codex로 src/rag_mcp 리뷰** 수행 후 옥석 검증(스펙 전제 모르는 일반론·1건 오독 제외).
+  실제 반영한 3건(테스트 먼저 → 구현 → 66 passed/1 skipped → 커밋):
+  1. **top_k 경계 검증**(`service.search_documents`): `1≤top_k≤100` 아니면 ValueError. bool은 int 새는 함정이라 명시 차단.
+  2. **필터 allowlist**: `filters` 키를 `_ALLOWED_FILTER_KEYS`로 제한(임의 payload 키 주입 방지).
+  3. **죽은 `metadata` 인자 제거**: `ingest_pdf`(server.py·service.py)에서 선언만 되고 안 쓰이던 인자 삭제.
+- 보류(맥락상 부적합/우선순위 낮음): payload-index 예외(=의도된 local no-op), 파일락 코드가드(=운영규칙으로 회피),
+  컬렉션 생성 경합(=단일 writer 전제), 책임분리/typed모델(=YAGNI), matched_by 오독 지적.
+
 ## 구현된 모듈 지도 (참고)
 - `config.py` 모델별 컬렉션/차원 · `models.py` Chunk/SearchResult/Manifest
 - `tokenizer.py`(코드/금액 보존)+`sparse.py`(blake2b idx, tf, IDF modifier 전제)

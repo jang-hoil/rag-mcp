@@ -54,6 +54,33 @@ def test_search_invalid_mode_raises(svc):
         svc.search_documents("x", search_mode="fuzzy")
 
 
+def test_search_top_k_out_of_range_raises(svc):
+    _seed(svc)
+    # 하한(0·음수)·상한(100 초과)·bool(True가 1로 통과하는 함정) 모두 거부
+    for bad in (0, -1, 101, True):
+        with pytest.raises(ValueError):
+            svc.search_documents("x", top_k=bad)
+
+
+def test_search_rejects_unknown_filter_key(svc):
+    _seed(svc)
+    with pytest.raises(ValueError):
+        svc.search_documents("x", filters={"unknown_field": 1})
+
+
+def test_search_accepts_allowed_filter_key(svc):
+    _seed(svc)
+    # is_table=True인 d1::c0만 후보로 남아야 함(에러 없이 동작)
+    results = svc.search_documents("일반수용비 한도", filters={"is_table": True})
+    assert all(r["source"]["is_table"] for r in results)
+
+
+def test_ingest_pdf_no_metadata_kwarg(svc):
+    # 죽은 metadata 인자 제거 확인 — 더 이상 받지 않음
+    with pytest.raises(TypeError):
+        svc.ingest_pdf("nonexistent.pdf", metadata={"x": 1})
+
+
 def test_get_chunk_tool(svc):
     _seed(svc)
     r = svc.get_chunk("d1::c0")

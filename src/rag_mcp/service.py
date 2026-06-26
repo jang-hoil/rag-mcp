@@ -16,6 +16,13 @@ from .models import Chunk
 from .retrieval import Retriever
 from .vector_store import VectorStore
 
+# 검색 상한 (MCP는 LLM이 인자를 채우므로 과도한 limit 방어)
+_MAX_TOP_K = 100
+# filters로 허용하는 payload 키 (임의 키 주입 방지 — Chunk.payload 필드 중 필터 의미 있는 것)
+_ALLOWED_FILTER_KEYS = frozenset(
+    {"fiscal_year", "document_id", "doc_name", "is_table", "has_amount", "has_code", "needs_image", "page"}
+)
+
 
 class RagService:
     def __init__(
@@ -51,6 +58,15 @@ class RagService:
             return []
         if search_mode not in ("hybrid", "dense", "sparse"):
             raise ValueError(f"search_mode는 hybrid|dense|sparse: {search_mode}")
+        # bool은 int 서브클래스라 True/False가 1/0으로 새는 것을 명시 차단
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or not (1 <= top_k <= _MAX_TOP_K):
+            raise ValueError(f"top_k는 1~{_MAX_TOP_K} 정수: {top_k!r}")
+        if filters:
+            unknown = set(filters) - _ALLOWED_FILTER_KEYS
+            if unknown:
+                raise ValueError(
+                    f"허용되지 않은 필터 키: {sorted(unknown)} (허용: {sorted(_ALLOWED_FILTER_KEYS)})"
+                )
         results = self._retriever(embedding_model).search(
             query, top_k=top_k, search_mode=search_mode, fusion=fusion,
             fiscal_year=fiscal_year, filters=filters,
@@ -118,7 +134,7 @@ class RagService:
 
     def ingest_pdf(
         self, path: str, document_id: str | None = None, fiscal_year: int | None = None,
-        doc_name: str | None = None, metadata: dict | None = None, embedding_model: str = "kure",
+        doc_name: str | None = None, embedding_model: str = "kure",
     ) -> dict:
         """PDF 색인. 파서·청킹 파이프라인(마일스톤2~3) 연결 지점."""
         if not Path(path).exists():
