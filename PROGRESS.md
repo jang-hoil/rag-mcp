@@ -88,7 +88,14 @@
   3. **스키마 일관성**: `SearchSource.has_code` 누락 노출. (커밋 d00b765)
 - **검증된 사실:** Qdrant local 이중 오픈 시 `RuntimeError("...already accessed...")` 발생(친절 변환함).
   `ManifestStatus`에 `error` 추가됨.
-- 미처리(우선순위 낮음): reparse=True 연결(기능), matched_by 표기/비용, fusion/model 검증, fiscal_year 이중경로 문서화.
+- 미처리(우선순위 낮음): matched_by 표기/비용, fusion/model 검증, fiscal_year 이중경로 문서화.
+
+### ✅ 완료 (2026-06-26) — reindex(reparse=True) 연결
+- **PDF 재파싱 재색인 구현**(`indexer.reindex_document`): manifest의 `source_path`로 `pipeline.parse_and_chunk`
+  재실행 → 새 청크로 재색인. 원본 PDF 없으면 친절 에러.
+- **metadata 유실 방지(중요):** reparse는 PDF를 다시 파싱하므로 사용자 수동 metadata(부서 등)가 날아갈 위험 →
+  `Manifest.meta` 필드 추가 + `index_chunks`가 metadata를 manifest에 보존 + reparse 시 복원.
+- 테스트 2건(source 없음 에러 / 재파싱+meta 복원), **73 passed/1 skipped**.
 
 ## 구현된 모듈 지도 (참고)
 - `config.py` 모델별 컬렉션/차원 · `models.py` Chunk/SearchResult/Manifest

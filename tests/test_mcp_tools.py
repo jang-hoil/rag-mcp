@@ -156,6 +156,33 @@ def test_reindex_tool(svc):
     assert res["num_chunks"] == 2
 
 
+def test_reindex_reparse_without_source_pdf(svc):
+    # source_path가 없는 문서는 reparse 불가 — 친절 에러
+    _seed(svc)  # ingest_chunks라 source_path 없음
+    res = svc.reindex_document("d1", reparse=True)
+    assert res["ok"] is False
+    assert "PDF" in res["error"]
+
+
+def test_reindex_reparse_reparses_and_preserves_meta(svc, monkeypatch, tmp_path):
+    # reparse=True: PDF 재파싱으로 본문 갱신 + 사용자 metadata는 manifest에서 복원
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_text("dummy")
+    svc.ingest_chunks("r1", [Chunk(chunk_id="r1::c0", document_id="r1", text="옛 본문", fiscal_year=2026)],
+                      source_path=str(pdf), metadata={"부서": "예산과"})
+
+    def fake_parse(path, doc_id, config, *, fiscal_year=None, doc_name=None, force=False):
+        new = [Chunk(chunk_id="r1::c0", document_id="r1", text="새로 파싱된 본문", fiscal_year=fiscal_year)]
+        return new, {"doc_name": doc_name, "fiscal_year": fiscal_year}
+
+    monkeypatch.setattr("rag_mcp.pipeline.parse_and_chunk", fake_parse)
+    res = svc.reindex_document("r1", reparse=True)
+    assert res["ok"] is True and res["reparse"] is True
+    hits = svc.search_documents("새로 파싱된 본문")
+    assert hits, "재파싱된 본문이 검색되지 않음"
+    assert hits[0]["source"]["meta"]["부서"] == "예산과", "reparse 후 사용자 metadata 유실됨"
+
+
 def test_collection_status_tool(svc):
     _seed(svc)
     st = svc.collection_status()

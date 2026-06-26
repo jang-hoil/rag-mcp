@@ -113,5 +113,7 @@ class Manifest(BaseModel):
     embedding_model: str = "kure"
     num_chunks: int = 0
     parsed_dir: Optional[str] = None
+    # 사용자 지정 metadata 보존 — reparse(PDF 재파싱) 시 복원용(PDF엔 없는 정보라 여기 남겨야 유실 방지)
+    meta: dict[str, Any] = Field(default_factory=dict)
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
