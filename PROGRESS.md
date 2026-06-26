@@ -79,6 +79,17 @@
 - **검증된 사실(중요):** local Qdrant가 **중첩 키 `meta.부서` 필터를 지원**함(test_metadata_filter_narrows_search 통과).
 - 테스트 3건 추가, **68 passed/1 skipped**.
 
+### ✅ 완료 (2026-06-26) — 2차 코드리뷰 반영 (데이터 안전 우선)
+- 2차 리뷰 검증 후 심각도순 3건 처리(테스트 먼저 → 구현 → 전체 통과 → 커밋):
+  1. **색인 실패 안전성**(`indexer.index_chunks`): 재색인 중 임베딩 실패 시 기존 데이터 유실되던 버그.
+     순서를 **임베딩 먼저 → 삭제 → 재삽입**으로 변경, 실패 시 `manifest.status="error"`. (커밋 7ad9ea6)
+  2. **파일락 가드**(`vector_store`): Qdrant local 이중 오픈 영어 에러 → 친절 한국어 안내.
+     Qdrant 자체 락 활용(별도 lock 파일 X). (커밋 c04e4f4)
+  3. **스키마 일관성**: `SearchSource.has_code` 누락 노출. (커밋 d00b765)
+- **검증된 사실:** Qdrant local 이중 오픈 시 `RuntimeError("...already accessed...")` 발생(친절 변환함).
+  `ManifestStatus`에 `error` 추가됨.
+- 미처리(우선순위 낮음): reparse=True 연결(기능), matched_by 표기/비용, fusion/model 검증, fiscal_year 이중경로 문서화.
+
 ## 구현된 모듈 지도 (참고)
 - `config.py` 모델별 컬렉션/차원 · `models.py` Chunk/SearchResult/Manifest
 - `tokenizer.py`(코드/금액 보존)+`sparse.py`(blake2b idx, tf, IDF modifier 전제)
