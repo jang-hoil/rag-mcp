@@ -105,6 +105,14 @@ def test_metadata_filter_key_allowed(svc):
     svc.search_documents("x", filters={"meta.anything": "v"})  # ValueError 안 나면 통과
 
 
+def test_search_result_includes_has_code(svc):
+    # has_code는 Chunk·payload에 있으니 검색 결과 source에도 노출돼야 함(스키마 일관성)
+    _seed(svc)
+    results = svc.search_documents("201-01 한도", fiscal_year=2026)
+    top = next(r for r in results if r["chunk_id"] == "d1::c0")
+    assert top["source"]["has_code"] is True
+
+
 def test_get_chunk_tool(svc):
     _seed(svc)
     r = svc.get_chunk("d1::c0")

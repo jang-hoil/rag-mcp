@@ -71,6 +71,7 @@ class SearchSource(BaseModel):
     heading_path: list[str] = Field(default_factory=list)
     is_table: bool = False
     has_amount: bool = False
+    has_code: bool = False
     needs_image: bool = False
     page_image: Optional[str] = None
     meta: dict[str, Any] = Field(default_factory=dict)
