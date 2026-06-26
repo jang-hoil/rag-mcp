@@ -64,9 +64,20 @@
   실제 반영한 3건(테스트 먼저 → 구현 → 66 passed/1 skipped → 커밋):
   1. **top_k 경계 검증**(`service.search_documents`): `1≤top_k≤100` 아니면 ValueError. bool은 int 새는 함정이라 명시 차단.
   2. **필터 allowlist**: `filters` 키를 `_ALLOWED_FILTER_KEYS`로 제한(임의 payload 키 주입 방지).
-  3. **죽은 `metadata` 인자 제거**: `ingest_pdf`(server.py·service.py)에서 선언만 되고 안 쓰이던 인자 삭제.
+  3. **죽은 `metadata` 인자 제거**: `ingest_pdf`에서 선언만 되고 안 쓰이던 인자 삭제. → **아래에서 실구현으로 전환됨.**
 - 보류(맥락상 부적합/우선순위 낮음): payload-index 예외(=의도된 local no-op), 파일락 코드가드(=운영규칙으로 회피),
   컬렉션 생성 경합(=단일 writer 전제), 책임분리/typed모델(=YAGNI), matched_by 오독 지적.
+
+### ✅ 완료 (2026-06-26) — metadata 실구현 (제거 → 기능화 전환)
+- **사용자 요구**: "메타정보가 있어야 정확한 검색" → 죽은 인자 제거(위 3번)를 되돌려 **저장+표시+필터**로 구현.
+- **설계**: 예약 payload 필드 충돌 방지 위해 **중첩 dict** `Chunk.meta`로 격리. Qdrant `meta.<키>` 중첩 필터 사용.
+  - `models.py`: `Chunk.meta`/`SearchSource.meta` 필드 + `payload()`에 meta 포함.
+  - `indexer.index_chunks(metadata=...)`: 문서 단위 메타를 각 청크 meta에 병합.
+  - `service.ingest_chunks/ingest_pdf` + `server.ingest_pdf`: metadata 인자 복원·전달.
+  - `retrieval._to_result/get_chunk`: 검색결과 `source.meta` 노출.
+  - `service.search_documents`: 필터 allowlist에 `meta.<키>` 허용.
+- **검증된 사실(중요):** local Qdrant가 **중첩 키 `meta.부서` 필터를 지원**함(test_metadata_filter_narrows_search 통과).
+- 테스트 3건 추가, **68 passed/1 skipped**.
 
 ## 구현된 모듈 지도 (참고)
 - `config.py` 모델별 컬렉션/차원 · `models.py` Chunk/SearchResult/Manifest

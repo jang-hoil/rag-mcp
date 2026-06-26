@@ -62,10 +62,12 @@ class RagService:
         if isinstance(top_k, bool) or not isinstance(top_k, int) or not (1 <= top_k <= _MAX_TOP_K):
             raise ValueError(f"top_k는 1~{_MAX_TOP_K} 정수: {top_k!r}")
         if filters:
-            unknown = set(filters) - _ALLOWED_FILTER_KEYS
+            # 예약 필드 또는 사용자 메타(meta.<key>)만 허용 — 임의 payload 키 주입 방지
+            unknown = {k for k in filters if k not in _ALLOWED_FILTER_KEYS and not k.startswith("meta.")}
             if unknown:
                 raise ValueError(
-                    f"허용되지 않은 필터 키: {sorted(unknown)} (허용: {sorted(_ALLOWED_FILTER_KEYS)})"
+                    f"허용되지 않은 필터 키: {sorted(unknown)} "
+                    f"(허용: {sorted(_ALLOWED_FILTER_KEYS)} 또는 meta.<키>)"
                 )
         results = self._retriever(embedding_model).search(
             query, top_k=top_k, search_mode=search_mode, fusion=fusion,
@@ -124,19 +126,23 @@ class RagService:
     def ingest_chunks(
         self, document_id: str, chunks: list[Chunk], doc_name: str | None = None,
         fiscal_year: int | None = None, source_path: str | None = None,
-        embedding_model: str = "kure",
+        metadata: dict | None = None, embedding_model: str = "kure",
     ) -> dict:
         """이미 추출된 청크를 색인 (파서 파이프라인의 종단·테스트용 진입점)."""
         m = self._indexer(embedding_model).index_chunks(
-            document_id, chunks, doc_name=doc_name, fiscal_year=fiscal_year, source_path=source_path,
+            document_id, chunks, doc_name=doc_name, fiscal_year=fiscal_year,
+            source_path=source_path, metadata=metadata,
         )
         return {"ok": True, "document_id": document_id, "num_chunks": m.num_chunks, "status": m.status}
 
     def ingest_pdf(
         self, path: str, document_id: str | None = None, fiscal_year: int | None = None,
-        doc_name: str | None = None, embedding_model: str = "kure",
+        doc_name: str | None = None, metadata: dict | None = None, embedding_model: str = "kure",
     ) -> dict:
-        """PDF 색인. 파서·청킹 파이프라인(마일스톤2~3) 연결 지점."""
+        """PDF 색인. 파서·청킹 파이프라인(마일스톤2~3) 연결 지점.
+
+        metadata: 부서·작성자·분류 등 문서 단위 추가 메타. 검색결과 표시·meta.<키> 필터에 사용.
+        """
         if not Path(path).exists():
             return {"ok": False, "error": f"PDF 없음: {path}"}
         try:
@@ -152,5 +158,5 @@ class RagService:
         return self.ingest_chunks(
             doc_id, chunks, doc_name=meta.get("doc_name", doc_name),
             fiscal_year=meta.get("fiscal_year", fiscal_year), source_path=path,
-            embedding_model=embedding_model,
+            metadata=metadata, embedding_model=embedding_model,
         )

@@ -75,10 +75,34 @@ def test_search_accepts_allowed_filter_key(svc):
     assert all(r["source"]["is_table"] for r in results)
 
 
-def test_ingest_pdf_no_metadata_kwarg(svc):
-    # 죽은 metadata 인자 제거 확인 — 더 이상 받지 않음
-    with pytest.raises(TypeError):
-        svc.ingest_pdf("nonexistent.pdf", metadata={"x": 1})
+def test_metadata_stored_and_shown(svc):
+    # metadata가 청크에 저장되고 검색 결과 source.meta로 노출되는지
+    chunks = [Chunk(chunk_id="m1::c0", document_id="m1", text="201-01 일반수용비 한도", fiscal_year=2026)]
+    svc.ingest_chunks("m1", chunks, doc_name="2026 예산기준", fiscal_year=2026,
+                      metadata={"부서": "예산과", "작성자": "홍길동"})
+    res = svc.search_documents("일반수용비 한도", fiscal_year=2026)
+    assert res, "검색 결과 없음"
+    assert res[0]["source"]["meta"]["부서"] == "예산과"
+    assert res[0]["source"]["meta"]["작성자"] == "홍길동"
+
+
+def test_metadata_filter_narrows_search(svc):
+    # 같은 본문이라도 meta.부서 필터로 해당 문서만 좁혀지는지
+    common = "공통검색어 알파베타"
+    svc.ingest_chunks("m2", [Chunk(chunk_id="m2::c0", document_id="m2", text=common, fiscal_year=2026)],
+                      metadata={"부서": "예산과"})
+    svc.ingest_chunks("m3", [Chunk(chunk_id="m3::c0", document_id="m3", text=common, fiscal_year=2026)],
+                      metadata={"부서": "회계과"})
+    res = svc.search_documents(common, filters={"meta.부서": "예산과"})
+    assert res, "필터 결과 없음"
+    assert all(r["source"]["meta"].get("부서") == "예산과" for r in res)
+    assert all(r["source"]["document_id"] == "m2" for r in res)
+
+
+def test_metadata_filter_key_allowed(svc):
+    # meta.* 필터 키는 allowlist를 통과해야 함(에러 없이 동작)
+    _seed(svc)
+    svc.search_documents("x", filters={"meta.anything": "v"})  # ValueError 안 나면 통과
 
 
 def test_get_chunk_tool(svc):

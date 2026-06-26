@@ -66,8 +66,15 @@ class Indexer:
         doc_name: str | None = None,
         fiscal_year: int | None = None,
         source_path: str | None = None,
+        metadata: dict | None = None,
     ) -> Manifest:
-        """청크 리스트를 색인 (parsed 청크는 이미 추출된 상태로 전달받음)."""
+        """청크 리스트를 색인 (parsed 청크는 이미 추출된 상태로 전달받음).
+
+        metadata: 문서 단위 추가 메타. 각 청크 meta에 병합되어 payload·검색결과·필터에 반영.
+        """
+        if metadata:
+            for c in chunks:
+                c.meta = {**c.meta, **metadata}
         self.manifests.update(
             document_id, status="parsed", doc_name=doc_name, fiscal_year=fiscal_year,
             source_path=source_path, embedding_model=self.embedding_model,

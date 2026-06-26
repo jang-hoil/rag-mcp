@@ -36,12 +36,13 @@ def search_documents(
 @mcp.tool()
 def ingest_pdf(
     path: str, document_id: str | None = None, fiscal_year: int | None = None,
-    doc_name: str | None = None, embedding_model: str = "kure",
+    doc_name: str | None = None, metadata: dict | None = None, embedding_model: str = "kure",
 ) -> dict:
-    """PDF를 색인. fiscal_year/doc_name 미지정 시 파일명·표지에서 자동 추출 시도."""
+    """PDF를 색인. fiscal_year/doc_name 미지정 시 파일명·표지에서 자동 추출 시도.
+    metadata(부서·작성자·분류 등)는 검색결과에 표시되고 meta.<키> 필터로 검색을 좁힐 수 있다."""
     return service().ingest_pdf(
         path, document_id=document_id, fiscal_year=fiscal_year, doc_name=doc_name,
-        embedding_model=embedding_model,
+        metadata=metadata, embedding_model=embedding_model,
     )
 
 

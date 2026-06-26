@@ -32,6 +32,10 @@ class Chunk(BaseModel):
     doc_name: Optional[str] = None
     source_path: Optional[str] = None
 
+    # 사용자 지정 추가 메타데이터 (부서·작성자·분류 등). 예약 필드 충돌 방지 위해 중첩 dict로 격리.
+    # Qdrant는 meta.<key> 형태로 필터 가능 → 검색 정확도용 메타 필터 지원.
+    meta: dict[str, Any] = Field(default_factory=dict)
+
     def payload(self) -> dict[str, Any]:
         """Qdrant payload용 dict (스펙 §6.7)."""
         return {
@@ -48,6 +52,7 @@ class Chunk(BaseModel):
             "fiscal_year": self.fiscal_year,
             "doc_name": self.doc_name,
             "source_path": self.source_path,
+            "meta": self.meta,
         }
 
     @classmethod
@@ -68,6 +73,7 @@ class SearchSource(BaseModel):
     has_amount: bool = False
     needs_image: bool = False
     page_image: Optional[str] = None
+    meta: dict[str, Any] = Field(default_factory=dict)
 
 
 class SearchResult(BaseModel):

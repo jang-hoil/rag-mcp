@@ -80,6 +80,7 @@ class Retriever:
             has_amount=bool(payload.get("has_amount")),
             needs_image=bool(payload.get("needs_image")),
             page_image=payload.get("page_image") if payload.get("needs_image") else None,
+            meta=payload.get("meta") or {},
         )
         return SearchResult(
             chunk_id=payload.get("chunk_id", str(p.id)),
@@ -113,6 +114,7 @@ class Retriever:
             has_amount=bool(payload.get("has_amount")),
             needs_image=bool(payload.get("needs_image")),
             page_image=payload.get("page_image") if payload.get("needs_image") else None,
+            meta=payload.get("meta") or {},
         )
         return SearchResult(
             chunk_id=chunk_id, text=payload.get("text", ""), score=1.0,
