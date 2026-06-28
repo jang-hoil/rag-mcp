@@ -23,6 +23,7 @@ MCP 서버는 stdio transport로 동작한다. CLI로 직접 실행하거나(점
 uv run rag-mcp serve      # MCP 서버 (stdio)
 uv run rag-mcp status     # 컬렉션 상태 확인
 uv run rag-mcp search "일상경비 한도" --top-k 5
+uv run rag-mcp eval eval/goldset.jsonl   # 검색 품질 평가 (골든셋 JSONL, 읽기 전용)
 ```
 
 ### Claude Desktop 등록
