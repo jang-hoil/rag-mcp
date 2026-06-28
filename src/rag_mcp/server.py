@@ -99,6 +99,13 @@ async def collection_status() -> dict:
     return await _run(service().collection_status)
 
 
+@mcp.tool()
+async def review_before_ingest(pdf_path: str) -> dict:
+    """새 PDF 색인 전 검토(읽기 전용). 들어올 문서 id/연도(파일명 기반)와 현재 색인된 전체
+    목록을 함께 반환한다. 삭제·색인·시리즈 매칭을 하지 않는다 — 어떤 구버전을 지울지는 사람이 판단."""
+    return await _run(service().review_before_ingest, pdf_path)
+
+
 def main() -> None:
     mcp.run()
 

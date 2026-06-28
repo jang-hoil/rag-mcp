@@ -113,6 +113,28 @@ def test_search_result_includes_has_code(svc):
     assert top["source"]["has_code"] is True
 
 
+def test_review_before_ingest_returns_incoming_and_full_list(svc):
+    # 두 버전(2025·2026)을 색인 → 2026 PDF 검토 시: incoming 식별자/연도 + 두 문서 모두 반환
+    svc.ingest_chunks("예산지침_2025",
+                      [Chunk(chunk_id="예산지침_2025::c0", document_id="예산지침_2025",
+                             text="2025년 예산편성 지침", fiscal_year=2025)],
+                      doc_name="2025 예산지침", fiscal_year=2025)
+    svc.ingest_chunks("예산지침_2026",
+                      [Chunk(chunk_id="예산지침_2026::c0", document_id="예산지침_2026",
+                             text="2026년 예산편성 지침", fiscal_year=2026)],
+                      doc_name="2026 예산지침", fiscal_year=2026)
+
+    res = svc.review_before_ingest("/inbox/예산지침_2026.pdf")
+
+    assert res["ok"] is True
+    # 들어올 문서: 파일명 stem과 파일명에서 추출한 연도
+    assert res["incoming"]["document_id"] == "예산지침_2026"
+    assert res["incoming"]["fiscal_year"] == 2026
+    # 전체 색인 목록에 두 문서 모두 포함(가공·필터 없음)
+    ids = {d["document_id"] for d in res["indexed_documents"]}
+    assert {"예산지침_2025", "예산지침_2026"} <= ids
+
+
 def test_get_chunk_tool(svc):
     _seed(svc)
     r = svc.get_chunk("d1::c0")
