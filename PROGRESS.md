@@ -114,12 +114,24 @@
   무거운 임베딩은 Qdrant 락을 안 잡으므로 색인 중에도 검색 거의 안 막힘.
 - **운영 메모**: CLI `ingest`는 동기 유지(별도 프로세스라 타임아웃 무관). MCP_연동가이드.md 도구 8개·비동기 워크플로우 반영.
 
+### ✅ 완료 (2026-06-28) — review_before_ingest 도구 추가 (도구 8→9개)
+- **목적**: 교체(replace-on-update) 워크플로우 — 새 지침 색인 전 현재 색인 목록을 먼저 보고
+  사람이 직접 구버전을 골라 삭제하도록 돕는 **읽기 전용** 도구.
+- **설계(사용자 확정)**: 정규화·유사도·시리즈 자동매칭 **일절 없음**. PDF 미오픈·파일존재 미확인.
+  들어올 문서 id(파일명 stem)+파일명에서만 추출한 연도 + `list_documents()` 전체 목록을 함께 반환.
+- **구현(테스트 먼저 → 82 passed/1 skipped → 커밋 `e3570d5`)**:
+  1. `service.review_before_ingest(pdf_path)` + 모듈 헬퍼 `_fiscal_year_from_filename`(`(?:19|20)\d{2}`, 마지막 매치).
+  2. `server.py`: `@mcp.tool() review_before_ingest` 등록(9번째, 기존 `_run` 위임 패턴).
+  3. 테스트 1건(2025·2026 색인 → incoming id/연도 + 두 문서 모두 반환 검증).
+- **하드룰 준수**: 삭제·색인·파이프라인 미수정. `list_documents` 헬퍼 재사용(중복 없음).
+- **문서 반영(커밋 `985a050`)**: README.md·MCP_연동가이드.md 도구 표 8→9개.
+
 ## 구현된 모듈 지도 (참고)
 - `config.py` 모델별 컬렉션/차원 · `models.py` Chunk/SearchResult/Manifest
 - `tokenizer.py`(코드/금액 보존)+`sparse.py`(blake2b idx, tf, IDF modifier 전제)
 - `embeddings.py`(KURE lazy) · `vector_store.py`(dense+sparse, 각 Prefetch.filter)
 - `manifest.py`(atomic·멱등) · `indexer.py`(chunks.jsonl·reindex) · `retrieval.py`(search/get_chunk)
-- `jobs.py`(비동기 ingest job·JobStore) · `service.py`(도구 8개 로직·submit_ingest/ingest_status)
+- `jobs.py`(비동기 ingest job·JobStore) · `service.py`(도구 9개 로직·submit_ingest/ingest_status·review_before_ingest)
 - `server.py`(FastMCP, async+anyio.to_thread) · `cli.py`(동기 ingest 유지)
 - 테스트: 모두 FakeEmbeddingBackend(`tests/conftest.py`)로 모델 없이 구동.
 
