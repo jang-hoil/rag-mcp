@@ -50,7 +50,7 @@ uv run rag-mcp search "일상경비 한도" --top-k 5
 
 ## 제공 도구
 
-서버가 노출하는 MCP 도구 8개:
+서버가 노출하는 MCP 도구 9개:
 
 | 도구 | 설명 |
 |---|---|
@@ -62,6 +62,7 @@ uv run rag-mcp search "일상경비 한도" --top-k 5
 | `delete_document` | 문서 삭제 (`confirm=True`일 때만 실제 실행) |
 | `reindex_document` | 재색인 (기본 `reparse=False`로 기존 parsed 재사용) |
 | `collection_status` | 컬렉션·연도별 문서수·차원·sparse 여부 |
+| `review_before_ingest` | **읽기 전용** 검토. 들어올 문서 id/연도(파일명 기반)와 현재 색인된 전체 목록을 함께 반환(삭제·색인·매칭 없음) |
 
 ### 비동기 색인 워크플로우
 
