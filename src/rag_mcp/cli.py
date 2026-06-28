@@ -42,6 +42,12 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("status", help="컬렉션 상태")
     sub.add_parser("serve", help="MCP 서버 실행 (ingest와 동시 실행 금지)")
 
+    p_eval = sub.add_parser("eval", help="검색 품질 평가(읽기 전용 골든셋 채점)")
+    p_eval.add_argument("goldset", help="JSONL 골든셋 경로 (예: eval/goldset.jsonl)")
+    p_eval.add_argument("--fetch-k", type=int, default=50)
+    p_eval.add_argument("--embedding-model", default="kure")
+    p_eval.add_argument("--json", action="store_true", help="요약을 JSON으로 출력")
+
     args = parser.parse_args(argv)
 
     # serve는 MCP 의존만 로딩
@@ -49,6 +55,16 @@ def main(argv: list[str] | None = None) -> int:
         from .server import main as serve_main
         print("[rag-mcp] MCP 서버 시작 (ingest 동시 실행 금지 — local 파일락)", file=sys.stderr)
         serve_main()
+        return 0
+
+    # eval은 read-only 평가 — 자체적으로 RagService를 구성하므로 여기서 일찍 처리
+    if args.cmd == "eval":
+        from .evaluation import format_report, run
+        summary = run(args.goldset, fetch_k=args.fetch_k, embedding_model=args.embedding_model)
+        if args.json:
+            _print(summary)
+        else:
+            print(format_report(summary))
         return 0
 
     from .service import RagService

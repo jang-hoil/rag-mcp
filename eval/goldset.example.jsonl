@@ -1,0 +1,8 @@
+# 검색 품질 골든셋 예시 (JSONL: 한 줄=한 케이스, '#' 줄·빈 줄 무시)
+# 필드: query(필수), type(general|code|amount), expect_substrings, match(all|any),
+#        fiscal_year, expect_document_id, expect_page, relevant_chunk_ids
+# 실제 색인된 문서에 맞게 값을 고쳐서 goldset.jsonl 로 복사해 사용하세요.
+# 실행: uv run rag-mcp eval eval/goldset.jsonl
+{"id": "code-201-01", "query": "일반수용비 과목코드", "type": "code", "expect_substrings": ["201-01"], "fiscal_year": 2026}
+{"id": "amt-수용비-한도", "query": "일반수용비 한도 금액", "type": "amount", "expect_substrings": ["50,000,000"], "match": "any", "fiscal_year": 2026}
+{"id": "q-명시이월", "query": "명시이월 요건과 절차", "type": "general", "expect_substrings": ["명시이월"], "fiscal_year": 2026}
