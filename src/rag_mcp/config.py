@@ -42,6 +42,15 @@ class Config:
     qdrant_url: str = field(default_factory=lambda: _env("RAG_QDRANT_URL", ""))
     embedding_model: str = field(default_factory=lambda: _env("RAG_EMBEDDING_MODEL", "kure"))
     render_dpi: int = field(default_factory=lambda: int(_env("RAG_RENDER_DPI", "200")))
+    # OCR: off | auto(스캔 PDF hybrid 후보·needs_image 구간) | force(needs_image 전부)
+    ocr_mode: str = field(default_factory=lambda: _env("RAG_OCR", "auto"))
+    ocr_min_chars_per_page: int = field(
+        default_factory=lambda: int(_env("RAG_OCR_MIN_CHARS", "30"))
+    )
+    ocr_lang: str = field(default_factory=lambda: _env("RAG_OCR_LANG", "kor+eng"))
+    # 스캔 PDF 문서 단위 OpenDataLoader hybrid (off면 페이지 OCR만; hybrid 서버 별도 기동)
+    odl_hybrid: str = field(default_factory=lambda: _env("RAG_ODL_HYBRID", "off"))
+    odl_hybrid_url: str = field(default_factory=lambda: _env("RAG_ODL_HYBRID_URL", ""))
 
     # 파생 경로
     @property
@@ -79,3 +88,4 @@ class Config:
 
 def load_config() -> Config:
     return Config()
+

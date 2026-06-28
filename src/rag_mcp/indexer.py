@@ -7,12 +7,14 @@ reindex(reparse=False): 기존 chunks.jsonl 재사용 → 재임베딩·재upser
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 
 from .config import Config
 from .embeddings import EmbeddingBackend, get_backend
 from .manifest import ManifestStore
 from .models import Chunk, Manifest
+from .request_models import DocumentMetadata, JsonValue
 from .vector_store import VectorStore
 
 
@@ -66,22 +68,24 @@ class Indexer:
         doc_name: str | None = None,
         fiscal_year: int | None = None,
         source_path: str | None = None,
-        metadata: dict | None = None,
+        metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None,
     ) -> Manifest:
         """청크 리스트를 색인 (parsed 청크는 이미 추출된 상태로 전달받음).
 
         metadata: 문서 단위 추가 메타. 각 청크 meta에 병합되어 payload·검색결과·필터에 반영.
         """
-        if metadata:
+        parsed_metadata = DocumentMetadata.from_raw(metadata)
+        metadata_payload = parsed_metadata.to_payload()
+        if metadata_payload:
             for c in chunks:
-                c.meta = {**c.meta, **metadata}
+                c.meta = {**c.meta, **metadata_payload}
         manifest_fields = dict(
             status="parsed", doc_name=doc_name, fiscal_year=fiscal_year,
             source_path=source_path, embedding_model=self.embedding_model,
             parsed_dir=str(self.config.parsed_doc_dir(document_id)),
         )
-        if metadata:
-            manifest_fields["meta"] = metadata  # reparse 시 복원용으로 manifest에 보존
+        if metadata_payload:
+            manifest_fields["meta"] = metadata_payload  # reparse 시 복원용으로 manifest에 보존
         self.manifests.update(document_id, **manifest_fields)
         self.save_chunks(document_id, chunks)
 

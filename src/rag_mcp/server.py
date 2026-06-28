@@ -16,6 +16,7 @@ import anyio
 from mcp.server.fastmcp import FastMCP
 
 from .service import RagService
+from .request_models import JsonValue
 
 mcp = FastMCP("rag-mcp")
 _service: RagService | None = None
@@ -36,7 +37,7 @@ async def _run(fn, *args, **kwargs):
 @mcp.tool()
 async def search_documents(
     query: str, top_k: int = 8, search_mode: str = "hybrid", embedding_model: str = "kure",
-    fusion: str = "rrf", fiscal_year: int | None = None, filters: dict | None = None,
+    fusion: str = "rrf", fiscal_year: int | None = None, filters: dict[str, JsonValue] | None = None,
 ) -> list[dict]:
     """회계·예산 지침서 하이브리드 검색. embedding_model이 컬렉션 결정.
     fiscal_year로 해당 연도만 검색. 결과가 needs_image면 page_image 경로 포함."""
@@ -49,7 +50,7 @@ async def search_documents(
 @mcp.tool()
 async def ingest_pdf(
     path: str, document_id: str | None = None, fiscal_year: int | None = None,
-    doc_name: str | None = None, metadata: dict | None = None, embedding_model: str = "kure",
+    doc_name: str | None = None, metadata: dict[str, JsonValue] | None = None, embedding_model: str = "kure",
 ) -> dict:
     """PDF 색인을 백그라운드로 시작하고 즉시 job_id를 반환(비블로킹).
 

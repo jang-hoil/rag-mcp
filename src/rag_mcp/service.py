@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 import threading
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +17,7 @@ from .indexer import Indexer
 from .jobs import JobStore
 from .manifest import ManifestStore
 from .models import Chunk
+from .request_models import DocumentMetadata, JsonValue, SearchFilters
 from .retrieval import Retriever
 from .vector_store import VectorStore
 
@@ -67,7 +69,7 @@ class RagService:
     def search_documents(
         self, query: str, top_k: int = 8, search_mode: str = "hybrid",
         embedding_model: str = "kure", fusion: str = "rrf",
-        fiscal_year: int | None = None, filters: dict | None = None,
+        fiscal_year: int | None = None, filters: Mapping[str, JsonValue] | SearchFilters | None = None,
     ) -> list[dict]:
         if not query or not query.strip():
             return []
@@ -76,17 +78,11 @@ class RagService:
         # bool은 int 서브클래스라 True/False가 1/0으로 새는 것을 명시 차단
         if isinstance(top_k, bool) or not isinstance(top_k, int) or not (1 <= top_k <= _MAX_TOP_K):
             raise ValueError(f"top_k는 1~{_MAX_TOP_K} 정수: {top_k!r}")
-        if filters:
-            # 예약 필드 또는 사용자 메타(meta.<key>)만 허용 — 임의 payload 키 주입 방지
-            unknown = {k for k in filters if k not in _ALLOWED_FILTER_KEYS and not k.startswith("meta.")}
-            if unknown:
-                raise ValueError(
-                    f"허용되지 않은 필터 키: {sorted(unknown)} "
-                    f"(허용: {sorted(_ALLOWED_FILTER_KEYS)} 또는 meta.<키>)"
-                )
+        parsed_filters = SearchFilters.from_raw(filters)
+        parsed_filters.ensure_allowed(_ALLOWED_FILTER_KEYS)
         results = self._retriever(embedding_model).search(
             query, top_k=top_k, search_mode=search_mode, fusion=fusion,
-            fiscal_year=fiscal_year, filters=filters,
+            fiscal_year=fiscal_year, filters=parsed_filters.to_qdrant(),
         )
         return [r.model_dump() for r in results]
 
@@ -160,7 +156,7 @@ class RagService:
     def ingest_chunks(
         self, document_id: str, chunks: list[Chunk], doc_name: str | None = None,
         fiscal_year: int | None = None, source_path: str | None = None,
-        metadata: dict | None = None, embedding_model: str = "kure",
+        metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None, embedding_model: str = "kure",
     ) -> dict:
         """이미 추출된 청크를 색인 (파서 파이프라인의 종단·테스트용 진입점)."""
         m = self._indexer(embedding_model).index_chunks(
@@ -171,7 +167,7 @@ class RagService:
 
     def ingest_pdf(
         self, path: str, document_id: str | None = None, fiscal_year: int | None = None,
-        doc_name: str | None = None, metadata: dict | None = None, embedding_model: str = "kure",
+        doc_name: str | None = None, metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None, embedding_model: str = "kure",
     ) -> dict:
         """PDF 색인. 파서·청킹 파이프라인(마일스톤2~3) 연결 지점.
 
@@ -189,15 +185,19 @@ class RagService:
             }
         doc_id = document_id or Path(path).stem
         chunks, meta = parse_and_chunk(path, doc_id, self.config, fiscal_year=fiscal_year, doc_name=doc_name)
+        parsed_metadata = DocumentMetadata.from_raw(metadata)
+        metadata_values = dict(parsed_metadata.values)
+        if meta.get("ocr"):
+            metadata_values["ocr"] = meta["ocr"]
         return self.ingest_chunks(
             doc_id, chunks, doc_name=meta.get("doc_name", doc_name),
             fiscal_year=meta.get("fiscal_year", fiscal_year), source_path=path,
-            metadata=metadata, embedding_model=embedding_model,
+            metadata=DocumentMetadata(values=metadata_values), embedding_model=embedding_model,
         )
 
     def submit_ingest(
         self, path: str, document_id: str | None = None, fiscal_year: int | None = None,
-        doc_name: str | None = None, metadata: dict | None = None, embedding_model: str = "kure",
+        doc_name: str | None = None, metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None, embedding_model: str = "kure",
     ) -> dict:
         """PDF 색인을 백그라운드 스레드로 던지고 즉시 job_id를 반환(비블로킹).
 

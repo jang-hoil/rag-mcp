@@ -212,6 +212,35 @@ def test_collection_status_tool(svc):
     assert st["by_fiscal_year"].get("2026") == 1
     assert "kure" in st["collections"]
 
+def test_ingest_pdf_records_ocr_info_in_manifest_meta(svc, monkeypatch, tmp_path):
+    pdf = tmp_path / "ocr.pdf"
+    pdf.write_bytes(b"%PDF")
+
+    def fake_parse(path, doc_id, config, *, fiscal_year=None, doc_name=None, force=False):
+        chunks = [Chunk(chunk_id="ocrdoc::c0", document_id="ocrdoc", text="OCR 본문", fiscal_year=2026)]
+        return chunks, {
+            "doc_name": "OCR 문서",
+            "fiscal_year": 2026,
+            "ocr": {"ocr_applied": False, "ocr_skipped": "pytesseract 미설치"},
+        }
+
+    monkeypatch.setattr("rag_mcp.pipeline.parse_and_chunk", fake_parse)
+
+    res = svc.ingest_pdf(str(pdf), document_id="ocrdoc", metadata={"부서": "예산과"})
+
+    assert res["ok"] is True
+    manifest = svc.manifests.read("ocrdoc")
+    assert manifest is not None
+    assert manifest.meta["부서"] == "예산과"
+    assert manifest.meta["ocr"]["ocr_skipped"] == "pytesseract 미설치"
+    hit = svc.search_documents("OCR 본문")
+    assert hit[0]["source"]["meta"]["ocr"]["ocr_skipped"] == "pytesseract 미설치"
+
+
+def test_search_rejects_non_scalar_filter_value(svc):
+    _seed(svc)
+    with pytest.raises(ValueError):
+        svc.search_documents("일반수용비", filters={"page": [9]})
 
 def test_ingest_pdf_missing_file(svc):
     res = svc.ingest_pdf("nonexistent.pdf")

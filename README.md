@@ -22,6 +22,7 @@ MCP 서버는 stdio transport로 동작한다. CLI로 직접 실행하거나(점
 ```bash
 uv run rag-mcp serve      # MCP 서버 (stdio)
 uv run rag-mcp status     # 컬렉션 상태 확인
+uv run rag-mcp doctor     # OCR/Tesseract 실행 환경 진단
 uv run rag-mcp search "일상경비 한도" --top-k 5
 uv run rag-mcp eval eval/goldset.jsonl   # 검색 품질 평가 (골든셋 JSONL, 읽기 전용)
 ```
@@ -73,6 +74,25 @@ uv run rag-mcp eval eval/goldset.jsonl   # 검색 품질 평가 (골든셋 JSONL
 2. `ingest_status(job_id)`를 주기적으로 호출 → `done`이면 `result`에 청크수, `error`면 원인.
 3. 동시 색인은 **1개만** 허용(Qdrant local 단일 writer). 색인 중에도 검색 등 다른 도구는 정상 응답.
 
+
+### OCR 운영
+
+기본값 `RAG_OCR=auto`는 전체 PDF에 무조건 OCR을 돌리지 않는다.
+
+- 디지털 PDF는 OpenDataLoader 텍스트/표 JSON을 우선 사용한다.
+- 스캔 PDF로 의심되고 `RAG_ODL_HYBRID`가 설정된 경우에만 OpenDataLoader hybrid OCR 후보가 된다.
+- 깨진 표/뭉친 표는 `needs_image=True` 청크의 렌더된 페이지 이미지만 Tesseract OCR로 텍스트 보강한다.
+- OCR 결과·skip 사유는 manifest/검색결과의 `meta.ocr`에 남는다.
+
+로컬 페이지 OCR을 쓰려면 Python extra와 Tesseract 실행파일/언어팩이 모두 필요하다.
+
+```bash
+uv sync --extra ocr
+winget install --id UB-Mannheim.TesseractOCR
+uv run rag-mcp doctor
+```
+
+`RAG_OCR=off`는 OCR 완전 비활성화, `RAG_OCR=force`는 `needs_image` 청크를 모두 OCR한다.
 ## 주의사항
 
 ### 파일락 — 단일 프로세스만 접근
@@ -94,6 +114,9 @@ Qdrant local path 모드는 다중 프로세스 접근이 불가하다.
 | `RAG_QDRANT_URL` | (없음) | server 모드 URL (예: `http://localhost:6333`) |
 | `RAG_EMBEDDING_MODEL` | `kure` | `kure`(KURE-v1) 또는 `bge_m3`(BGE-M3). 저장·검색 모델이 일치해야 함 |
 | `RAG_RENDER_DPI` | `200` | 표 이미지 렌더 DPI |
+| `RAG_OCR` | `auto` | `off`/`auto`/`force`. auto는 스캔 PDF hybrid 후보와 깨진 표 구간만 OCR |
+| `RAG_OCR_LANG` | `kor+eng` | Tesseract OCR 언어 |
+| `RAG_ODL_HYBRID` | `off` | 스캔 PDF 문서 단위 hybrid OCR 사용 시 설정 |
 
 ### gitignore되는 것 (재생성 가능)
 

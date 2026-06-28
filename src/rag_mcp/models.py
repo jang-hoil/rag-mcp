@@ -8,6 +8,8 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from .request_models import JsonValue
+
 
 class Chunk(BaseModel):
     """색인 단위. 표는 atomic 청크(절대 중간 분할 금지 — 스펙 §6.3)."""
@@ -34,7 +36,7 @@ class Chunk(BaseModel):
 
     # 사용자 지정 추가 메타데이터 (부서·작성자·분류 등). 예약 필드 충돌 방지 위해 중첩 dict로 격리.
     # Qdrant는 meta.<key> 형태로 필터 가능 → 검색 정확도용 메타 필터 지원.
-    meta: dict[str, Any] = Field(default_factory=dict)
+    meta: dict[str, JsonValue] = Field(default_factory=dict)
 
     def payload(self) -> dict[str, Any]:
         """Qdrant payload용 dict (스펙 §6.7)."""
@@ -74,7 +76,7 @@ class SearchSource(BaseModel):
     has_code: bool = False
     needs_image: bool = False
     page_image: Optional[str] = None
-    meta: dict[str, Any] = Field(default_factory=dict)
+    meta: dict[str, JsonValue] = Field(default_factory=dict)
 
 
 class SearchResult(BaseModel):
@@ -114,6 +116,6 @@ class Manifest(BaseModel):
     num_chunks: int = 0
     parsed_dir: Optional[str] = None
     # 사용자 지정 metadata 보존 — reparse(PDF 재파싱) 시 복원용(PDF엔 없는 정보라 여기 남겨야 유실 방지)
-    meta: dict[str, Any] = Field(default_factory=dict)
+    meta: dict[str, JsonValue] = Field(default_factory=dict)
     created_at: Optional[str] = None
     updated_at: Optional[str] = None

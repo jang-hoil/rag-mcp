@@ -95,14 +95,29 @@ def parse_pdf(
     if force or json_path is None:
         import opendataloader_pdf
 
-        opendataloader_pdf.convert(
+        from .ocr_triage import document_needs_ocr
+
+        convert_kw: dict = dict(
             input_path=str(pdf_path),
             output_dir=str(out_dir),
             format="markdown,json",
-            table_method="cluster",      # border + cluster (borderless 표 대응)
-            markdown_with_html=True,     # markdown 표를 HTML로(평면화 완화)
+            table_method="cluster",
+            markdown_with_html=True,
             quiet=True,
         )
+        # 스캔 PDF 의심 + hybrid 설정 시 문서 단위 OCR(OpenDataLoader hybrid)
+        if config.ocr_mode != "off" and config.odl_hybrid != "off":
+            use_hybrid = config.ocr_mode == "force" or document_needs_ocr(
+                pdf_path, config.ocr_min_chars_per_page
+            )
+            if use_hybrid:
+                convert_kw["hybrid"] = config.odl_hybrid
+                convert_kw["hybrid_hancom_ai_ocr_strategy"] = "auto"
+                convert_kw["hybrid_fallback"] = True
+                if config.odl_hybrid_url:
+                    convert_kw["hybrid_url"] = config.odl_hybrid_url
+
+        opendataloader_pdf.convert(**convert_kw)
         json_path = _find_output(out_dir, "json")
 
     if json_path is None:

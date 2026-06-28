@@ -7,11 +7,14 @@
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from qdrant_client.models import ScoredPoint
 
 from .config import Config
 from .embeddings import EmbeddingBackend, get_backend
 from .models import SearchResult, SearchSource
+from .request_models import FilterValue
 from .sparse import to_sparse
 from .vector_store import VectorStore
 
@@ -42,7 +45,7 @@ class Retriever:
         search_mode: str = "hybrid",
         fusion: str = "rrf",
         fiscal_year: int | None = None,
-        filters: dict | None = None,
+        filters: Mapping[str, FilterValue] | None = None,
     ) -> list[SearchResult]:
         dense_vec = None
         sparse_vec = None

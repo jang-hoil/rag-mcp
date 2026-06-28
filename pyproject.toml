@@ -20,6 +20,10 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
 ]
+ocr = [
+    "pytesseract>=0.3.10",
+    "Pillow>=10.0.0",
+]
 
 [project.scripts]
 rag-mcp = "rag_mcp.cli:main"

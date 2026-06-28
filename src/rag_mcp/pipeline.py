@@ -8,6 +8,7 @@ from .chunking import build_chunks
 from .config import Config
 from .metadata import extract_doc_meta
 from .models import Chunk
+from .ocr import augment_chunks_with_ocr
 from .page_render import render_pages
 from .pdf_parser import parse_pdf
 
@@ -21,7 +22,7 @@ def parse_and_chunk(
     doc_name: str | None = None,
     force: bool = False,
 ) -> tuple[list[Chunk], dict[str, Any]]:
-    """PDF 파싱 → 메타 추출 → 청킹 → needs_image 페이지 PNG 렌더."""
+    """PDF 파싱 → 메타 추출 → 청킹 → needs_image PNG → (선택) OCR text 보강."""
     parsed = parse_pdf(pdf_path, document_id, config, force=force)
     meta = extract_doc_meta(parsed, doc_name=doc_name, fiscal_year=fiscal_year)
     meta["parsed_dir"] = str(parsed.parsed_dir)
@@ -40,5 +41,9 @@ def parse_and_chunk(
         for chunk in chunks:
             if chunk.needs_image and chunk.page in page_paths:
                 chunk.page_image = page_paths[chunk.page]
+
+    chunks, ocr_info = augment_chunks_with_ocr(chunks, config)
+    if ocr_info.get("ocr_applied") or ocr_info.get("ocr_skipped"):
+        meta["ocr"] = ocr_info
 
     return chunks, meta

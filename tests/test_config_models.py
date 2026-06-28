@@ -12,6 +12,11 @@ def test_collection_by_model():
     assert cfg.dimension("kure") == 1024
 
 
+def test_ocr_default_uses_auto_triage():
+    cfg = Config()
+    assert cfg.ocr_mode == "auto"
+
+
 def test_unknown_model_raises():
     cfg = Config()
     try:
@@ -76,3 +81,4 @@ def test_manifest_status_default():
     assert m.status == "parsing"
     m.status = "done"
     assert m.status == "done"
+

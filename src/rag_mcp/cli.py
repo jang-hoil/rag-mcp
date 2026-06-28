@@ -40,6 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     p_search.add_argument("--embedding-model", default="kure")
 
     sub.add_parser("status", help="컬렉션 상태")
+    sub.add_parser("doctor", help="로컬 OCR/Tesseract 실행 환경 진단")
     sub.add_parser("serve", help="MCP 서버 실행 (ingest와 동시 실행 금지)")
 
     p_eval = sub.add_parser("eval", help="검색 품질 평가(읽기 전용 골든셋 채점)")
@@ -65,6 +66,12 @@ def main(argv: list[str] | None = None) -> int:
             _print(summary)
         else:
             print(format_report(summary))
+        return 0
+
+    if args.cmd == "doctor":
+        from .config import load_config
+        from .doctor import check_ocr_environment
+        _print(check_ocr_environment(load_config()))
         return 0
 
     from .service import RagService

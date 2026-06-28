@@ -8,12 +8,14 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Mapping
 import uuid
 
 from qdrant_client import QdrantClient, models
 
 from .config import Config
 from .models import Chunk
+from .request_models import FilterValue
 from .sparse import to_sparse
 
 # chunk_id → 안정 포인트 UUID (재색인 멱등)
@@ -117,7 +119,7 @@ class VectorStore:
             )
 
     # --- 검색 ---
-    def _filter(self, fiscal_year: int | None, filters: dict | None) -> models.Filter | None:
+    def _filter(self, fiscal_year: int | None, filters: Mapping[str, FilterValue] | None) -> models.Filter | None:
         must = []
         if fiscal_year is not None:
             must.append(models.FieldCondition(key="fiscal_year", match=models.MatchValue(value=fiscal_year)))
@@ -134,7 +136,7 @@ class VectorStore:
         search_mode: str = "hybrid",
         fusion: str = "rrf",
         fiscal_year: int | None = None,
-        filters: dict | None = None,
+        filters: Mapping[str, FilterValue] | None = None,
     ) -> list[models.ScoredPoint]:
         qfilter = self._filter(fiscal_year, filters)
         sparse_q = (
