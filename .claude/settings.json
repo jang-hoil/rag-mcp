@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -rc 'if (.tool_input.file_path // \"\") | gsub(\"\\\\\\\\\"; \"/\") | test(\"(^|/)src/rag_mcp/[^/]*[.]py$\") then {hookSpecificOutput:{hookEventName:\"PostToolUse\",additionalContext:\"방금 src/rag_mcp 소스를 수정했습니다. 이 변경이 README.md의 제공 도구 목록·환경변수·실행/연결 방법에 영향을 주는지 점검하고, 필요하면 README.md도 함께 갱신하세요.\"}} else empty end'",
+            "shell": "bash",
+            "timeout": 10,
+            "statusMessage": "README 영향 점검 중"
+          }
+        ]
+      }
+    ]
+  }
+}
