@@ -180,8 +180,13 @@ Edit Config 클릭
 |---|---|
 | `rag-mcp` | Claude Desktop에 표시될 서버 이름 |
 | `command` | RAG MCP를 실행할 `uv.exe` 위치 |
-| `--directory` | RAG MCP 프로젝트 폴더에서 실행하라는 뜻 |
+| `--directory` | 서버를 **이 프로젝트 폴더에서 실행**하라는 뜻. 색인 결과가 저장되는 `data\` 폴더도 여기에 생긴다 |
 | `run rag-mcp serve` | MCP 서버를 켜라는 뜻 |
+
+> **`--directory`가 색인 데이터(`data\`)의 위치를 정합니다.**
+> 색인 결과는 PDF를 어디에 두었는지와 **상관없이** 항상 `--directory`로 지정한 프로젝트 폴더 안 `data\`에 생깁니다(PDF 경로는 "읽어올 원본 주소"일 뿐입니다).
+> 엉뚱한 폴더를 적으면 색인이 거기 쌓여 "사라진 것처럼" 보이니, 반드시 이 프로젝트를 풀어둔 폴더를 적으세요.
+> 무엇이 어디에 생기는지는 아래 [운영 주의사항](#운영-주의사항)을 참고하세요.
 
 “stdio transport”는 사용자가 서버 창을 따로 켜 두는 방식이 아닙니다. Claude Desktop이 필요할 때 위 명령을 뒤에서 실행하고, Claude Desktop과 RAG MCP가 표준입출력으로 통신한다는 뜻입니다.
 
@@ -289,6 +294,8 @@ Claude Desktop에서 이렇게 물어봅니다.
 정상이라면 컬렉션 이름, 문서 수, sparse 사용 여부 같은 상태가 나옵니다.
 
 ### PDF를 새로 넣을 때
+
+PDF 파일은 아무 폴더에 두어도 됩니다. 경로만 알려주면 되고, 색인 결과는 PDF 위치와 무관하게 프로젝트 폴더의 `data\`에 저장됩니다.
 
 먼저 현재 색인 목록을 확인합니다.
 
@@ -398,6 +405,25 @@ Qdrant local path 모드는 **동시에 하나의 프로세스만** 접근해야
 Claude Desktop에 MCP로 연결해 쓰는 동안에는 다른 터미널에서 `uv run rag-mcp ingest`를 실행하지 마세요. PDF 색인은 Claude Desktop에서 `ingest_pdf`로 요청하는 것이 안전합니다.
 
 또한 Claude Desktop이 서버를 켜 둔 동안에는 실행파일(`rag-mcp.exe`)이 잠겨 있어 다른 터미널의 `uv run ...`(예: `uv run pytest`)이 *파일이 사용 중* 오류로 실패할 수 있습니다. 이때는 Claude Desktop을 잠시 종료하거나, 가상환경 파이썬으로 직접 실행하세요: `./.venv/Scripts/python.exe -m pytest -q`.
+
+### 색인하면 무엇이 어디에 생기나
+
+`data\` 폴더 하나만 생기는 게 아닙니다. 역할별로 나누면 이렇게 됩니다.
+
+```text
+# 프로젝트 폴더(--directory) 안
+data\parsed\{문서}\   ← 파싱 캐시(다시 파싱하지 않으려고 보관): json·md·문서 내 이미지·페이지 PNG·chunks
+data\qdrant\          ← 검색용 벡터 저장소(모든 문서가 함께 쓰는 단일 저장소)
+data\manifests\       ← 색인 목록·상태 원장(list_documents가 읽는 곳)
+.venv\                ← Python 가상환경(설치 시 1회 생성)
+
+# 프로젝트 폴더 밖 — 사용자 홈 (가장 큰 용량)
+C:\Users\{사용자}\.cache\huggingface\   ← 임베딩 모델 KURE-v1(수 GB)
+```
+
+> **`data\`만 생기는 게 아닙니다.** 임베딩 모델(수 GB)은 프로젝트 폴더가 아니라 **사용자 홈의 HuggingFace 캐시**에 받아집니다. 모든 프로젝트가 공유하므로 `--directory`나 `data\`를 바꿔도 그대로 남고, 첫 색인 때 한 번만 다운로드됩니다. 그래서 용량 정리한다고 `data\`만 지워도 모델(수 GB)은 그대로 남습니다.
+
+`data\`의 위치는 [환경 변수](#환경-변수)의 `RAG_DATA_DIR`로 바꿀 수 있습니다(절대경로를 넣으면 실행 위치와 무관하게 한곳에 고정).
 
 커밋하지 않는 재생성 산출물:
 
