@@ -173,69 +173,81 @@ Edit Config 클릭
 | `command` | `uv.exe`가 설치된 위치 |
 | `--directory` 다음 값 | 이 프로젝트 폴더 위치 |
 
-#### `uv.exe` 경로 확인 예시
+#### `uv.exe` 경로 확인
 
-터미널에서 아래 명령을 실행합니다.
+터미널이나 PowerShell에서 아래 명령을 실행합니다.
 
 ```bash
 where uv
 ```
 
-예를 들어 이렇게 나올 수 있습니다.
+예를 들어 이렇게 나오면:
 
 ```text
 C:\Users\Owner\AppData\Local\Programs\Python\Python313\Scripts\uv.exe
 C:\Users\Owner\.local\bin\uv.exe
 ```
 
-둘 중 하나를 골라 `command` 값에 넣으면 됩니다. 보통 첫 번째 경로를 쓰면 됩니다.
+둘 중 하나를 골라 `command` 값에 넣으면 됩니다. 보통 첫 번째 줄을 쓰면 됩니다.
 
-Windows 경로는 원래 이렇게 생겼습니다.
+단, JSON에서는 `\`를 `\\`처럼 두 번 써야 합니다.
 
-```text
-C:\Users\Owner\AppData\Local\Programs\Python\Python313\Scripts\uv.exe
-```
-
-하지만 JSON 파일 안에서는 `\`를 그냥 한 번 쓰면 안 됩니다. `\`를 `\\`처럼 두 번 써야 합니다.
-
-그래서 JSON에는 이렇게 적습니다.
-
-```json
-"command": "C:\\Users\\Owner\\AppData\\Local\\Programs\\Python\\Python313\\Scripts\\uv.exe"
-```
-
-#### 프로젝트 폴더 경로 예시
-
-프로젝트가 실제로 아래 폴더에 있다면:
-
-```text
-C:\Users\Owner\Desktop\RAG MCP
-```
-
-JSON의 `args` 안에서는 이렇게 적습니다.
-
-```json
-"args": [
-  "--directory",
-  "C:\\Users\\Owner\\Desktop\\RAG MCP",
-  "run",
-  "rag-mcp",
-  "serve"
-]
-```
-
-즉, 실제 Windows 경로와 JSON에 적는 값은 이렇게 대응됩니다.
-
-| 실제 경로 | JSON에 적는 값 |
+| 터미널에 나온 경로 | JSON에 적는 값 |
 |---|---|
-| `C:\Users\Owner\Desktop\RAG MCP` | `C:\\Users\\Owner\\Desktop\\RAG MCP` |
 | `C:\Users\Owner\AppData\Local\Programs\Python\Python313\Scripts\uv.exe` | `C:\\Users\\Owner\\AppData\\Local\\Programs\\Python\\Python313\\Scripts\\uv.exe` |
+
+#### 내 PC에 맞게 바꾸기
+
+아래 예시에서 보통 2곳만 바꾸면 됩니다.
+
+```json
+{
+  "mcpServers": {
+    "rag-mcp": {
+      "command": "C:\\Users\\Owner\\AppData\\Local\\Programs\\Python\\Python313\\Scripts\\uv.exe",
+      "args": [
+        "--directory",
+        "C:\\Users\\Owner\\Desktop\\RAG MCP",
+        "run",
+        "rag-mcp",
+        "serve"
+      ]
+    }
+  }
+}
+```
+
+| 바꿀 곳 | 넣을 값 |
+|---|---|
+| `command` | `where uv`에서 나온 `uv.exe` 경로 |
+| `--directory` 다음 줄 | 이 프로젝트 폴더 경로 |
+
+`command`에는 `uv.exe` 경로만 넣습니다. `uv run rag-mcp serve` 같은 실행 명령 전체를 넣지 않습니다. 실행 옵션은 `args`에 나눠 넣습니다.
+
+헷갈리면 `/`를 써도 됩니다. JSON에서는 아래처럼 적어도 정상입니다.
+
+```json
+{
+  "mcpServers": {
+    "rag-mcp": {
+      "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/Scripts/uv.exe",
+      "args": [
+        "--directory",
+        "C:/Users/Owner/Desktop/RAG MCP",
+        "run",
+        "rag-mcp",
+        "serve"
+      ]
+    }
+  }
+}
+```
 
 흔한 실수:
 
-- `command`에 `where uv`라고 적으면 안 됩니다. `where uv`는 위치를 찾는 명령이고, JSON에는 찾은 결과 경로를 넣어야 합니다.
-- JSON에서 `C:\Users\...`처럼 한 번만 쓰면 오류가 날 수 있습니다. `C:\\Users\\...`처럼 두 번 써야 합니다.
-- 프로젝트 폴더 경로에 공백이 있어도 괜찮습니다. JSON 문자열 안에 넣으면 됩니다.
+- `command`에 `where uv`라고 적지 않습니다. `where uv`는 경로를 찾는 명령입니다.
+- `command`에 명령 전체를 적지 않습니다. `uv.exe` 경로만 적습니다.
+- `C:\Users\...`처럼 `\`를 한 번만 쓰면 JSON 오류가 날 수 있습니다. `C:\\Users\\...`처럼 두 번 씁니다.
 
 ### 5. Claude Desktop 재시작
 
