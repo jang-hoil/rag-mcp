@@ -247,6 +247,48 @@ def test_ingest_pdf_missing_file(svc):
     assert res["ok"] is False
 
 
+def test_retriever_cache_is_thread_safe(svc, monkeypatch):
+    """동시 호출에도 모델별 VectorStore(=Qdrant local client)는 단 한 번만 생성돼야 한다.
+
+    Qdrant local path 모드는 단일 writer 전제다. retriever 캐시를 lock 없이 lazy로 만들면
+    백그라운드 ingest 스레드와 메인 검색 스레드가 같은 모델의 VectorStore를 두 개 열어
+    같은 경로에 파일락 충돌을 낸다. 생성자를 느리게 만들고 Barrier로 동시 진입시켜
+    race 창을 강제로 벌린다 — lock이 없으면 created가 2개 이상 쌓여 실패한다.
+    """
+    import threading
+    import time
+
+    from rag_mcp import service as service_mod
+
+    created: list[str] = []
+
+    class CountingStore:
+        def __init__(self, config, model):
+            created.append(model)
+            time.sleep(0.02)  # race 창 확대
+
+        def status(self):
+            return {}
+
+    monkeypatch.setattr(service_mod, "VectorStore", CountingStore)
+
+    results: list[object] = []
+    barrier = threading.Barrier(8)
+
+    def worker():
+        barrier.wait()  # 8개 스레드를 동시에 진입시켜 경쟁 유발
+        results.append(svc._retriever("kure"))
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert created.count("kure") == 1, f"VectorStore가 {created.count('kure')}번 생성됨(파일락 위험)"
+    assert len({id(r) for r in results}) == 1, "스레드마다 다른 retriever 인스턴스를 받음"
+
+
 def test_server_imports_and_registers_tools():
     """FastMCP server가 import되고 도구 8개(ingest_status 포함)가 등록되는지."""
     import asyncio

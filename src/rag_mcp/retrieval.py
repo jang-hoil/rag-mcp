@@ -65,6 +65,8 @@ class Retriever:
         payload = p.payload or {}
         matched_by: list[str] = []
         if search_mode in ("dense", "hybrid"):
+            # dense는 근사 표기: dense 신호가 동작한 검색이면 항상 포함(개별 청크 기여도는 미산정).
+            # sparse는 아래에서 질의·문서 토큰 겹침을 실제로 확인한다.
             matched_by.append("dense")
         if search_mode in ("sparse", "hybrid"):
             # 질의 sparse 토큰이 청크 텍스트와 겹치면 sparse 기여로 표기

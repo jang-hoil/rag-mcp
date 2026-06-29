@@ -33,10 +33,11 @@ def document_needs_ocr(pdf_path: str | Path, min_chars_per_page: int = 30) -> bo
 
 
 def chunk_needs_page_ocr(chunk: Chunk, config: Config) -> bool:
-    """needs_image PNG에 대한 페이지 OCR 대상 여부 (vision page_image는 항상 유지)."""
+    """needs_image PNG에 대한 페이지 OCR 대상 여부 (vision page_image는 항상 유지).
+
+    auto·force 모두 뭉친 표·이미지 폴백(needs_image) 청크만 PNG OCR 대상이다.
+    force의 추가 효과는 청크 레벨이 아니라 문서 단위(pdf_parser의 hybrid 강제)에서 발생한다.
+    """
     if config.ocr_mode == "off":
         return False
-    if config.ocr_mode == "force":
-        return bool(chunk.needs_image and chunk.page_image)
-    # auto: 뭉친 표·이미지 폴백 청크만
     return bool(chunk.needs_image and chunk.page_image)

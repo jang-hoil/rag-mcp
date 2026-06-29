@@ -107,9 +107,28 @@ Edit Config 클릭
 
 직접 열고 싶다면 Windows 실행창이나 파일 탐색기 주소창에 위 경로를 넣어도 됩니다.
 
-### 2. 이 PC에서 바로 쓰는 설정
+### 2. 설정 파일 작성
 
-이 저장소가 `C:\Users\Owner\Desktop\RAG MCP`에 있고, `uv.exe`가 아래 경로에 있다면 설정 파일을 이렇게 만듭니다.
+아래 형태로 작성합니다. **굵게 표시한 두 경로는 사람마다 다르므로 본인 PC 값으로 바꿔야 합니다.** (바꾸는 방법은 바로 아래 4번에서 설명합니다.)
+
+```json
+{
+  "mcpServers": {
+    "rag-mcp": {
+      "command": "<여기에 uv.exe 경로>",
+      "args": [
+        "--directory",
+        "<여기에 이 프로젝트 폴더 경로>",
+        "run",
+        "rag-mcp",
+        "serve"
+      ]
+    }
+  }
+}
+```
+
+참고로, 이 저장소가 `C:\Users\Owner\Desktop\RAG MCP`에 있는 한 대의 PC에서는 실제로 아래처럼 채워집니다(어디까지나 **예시**입니다 — 본인 경로로 바꾸세요).
 
 ```json
 {
@@ -127,6 +146,8 @@ Edit Config 클릭
   }
 }
 ```
+
+> 위 예시 경로의 `Python313`은 단지 `uv.exe`가 설치된 위치일 뿐이며, 이 프로젝트가 실행에 쓰는 Python(3.11)과는 무관합니다. `uv`가 알아서 3.11 가상환경을 사용하므로 신경 쓰지 않아도 됩니다.
 
 이미 다른 MCP 서버가 등록되어 있다면 전체 파일을 덮어쓰지 말고, `mcpServers` 안에 `rag-mcp` 항목만 추가합니다.
 
@@ -365,14 +386,18 @@ Claude Desktop 중심으로 사용할 때는 자주 쓰지 않아도 되지만, 
 | `RAG_EMBEDDING_MODEL` | `kure` | `kure` 또는 `bge_m3` |
 | `RAG_RENDER_DPI` | `200` | 표/페이지 이미지 렌더 DPI |
 | `RAG_OCR` | `auto` | `off`, `auto`, `force` |
+| `RAG_OCR_MIN_CHARS` | `30` | 스캔 PDF 판정 임계(페이지당 글자 수가 이 값 미만이면 빈약한 페이지) |
 | `RAG_OCR_LANG` | `kor+eng` | Tesseract OCR 언어 |
-| `RAG_ODL_HYBRID` | `off` | 스캔 PDF 문서 단위 hybrid OCR 사용 시 설정 |
+| `RAG_ODL_HYBRID` | `off` | 스캔 PDF 문서 단위 hybrid OCR 사용 시 설정 (예: `hancom-ai`) |
+| `RAG_ODL_HYBRID_URL` | 없음 | hybrid OCR 서버 URL (별도 기동 시) |
 
 ## 운영 주의사항
 
 Qdrant local path 모드는 **동시에 하나의 프로세스만** 접근해야 합니다.
 
 Claude Desktop에 MCP로 연결해 쓰는 동안에는 다른 터미널에서 `uv run rag-mcp ingest`를 실행하지 마세요. PDF 색인은 Claude Desktop에서 `ingest_pdf`로 요청하는 것이 안전합니다.
+
+또한 Claude Desktop이 서버를 켜 둔 동안에는 실행파일(`rag-mcp.exe`)이 잠겨 있어 다른 터미널의 `uv run ...`(예: `uv run pytest`)이 *파일이 사용 중* 오류로 실패할 수 있습니다. 이때는 Claude Desktop을 잠시 종료하거나, 가상환경 파이썬으로 직접 실행하세요: `./.venv/Scripts/python.exe -m pytest -q`.
 
 커밋하지 않는 재생성 산출물:
 

@@ -52,18 +52,24 @@ class RagService:
         # 비동기 ingest: 백그라운드 job 추적 + 동시 ingest 1개 제한(Qdrant local 단일 writer 전제)
         self.jobs = JobStore()
         self._submit_lock = threading.Lock()
+        # retriever/indexer 캐시 빌드 보호. 백그라운드 ingest 스레드와 메인 검색 스레드가
+        # 같은 모델의 VectorStore(Qdrant local client)를 동시에 두 개 열어 파일락이 충돌하는 것을 막는다.
+        # _indexer가 락을 쥔 채 _retriever를 재호출하므로 재진입 가능한 RLock을 쓴다.
+        self._resource_lock = threading.RLock()
 
     def _retriever(self, model: str) -> Retriever:
-        if model not in self._retrievers:
-            store = VectorStore(self.config, model)
-            self._retrievers[model] = Retriever(self.config, model, backend=self._backend, store=store)
-        return self._retrievers[model]
+        with self._resource_lock:
+            if model not in self._retrievers:
+                store = VectorStore(self.config, model)
+                self._retrievers[model] = Retriever(self.config, model, backend=self._backend, store=store)
+            return self._retrievers[model]
 
     def _indexer(self, model: str) -> Indexer:
-        if model not in self._indexers:
-            store = self._retriever(model).store  # 같은 컬렉션/클라이언트 공유
-            self._indexers[model] = Indexer(self.config, model, backend=self._backend, store=store)
-        return self._indexers[model]
+        with self._resource_lock:
+            if model not in self._indexers:
+                store = self._retriever(model).store  # 같은 컬렉션/클라이언트 공유
+                self._indexers[model] = Indexer(self.config, model, backend=self._backend, store=store)
+            return self._indexers[model]
 
     # --- 도구 ---
     def search_documents(
