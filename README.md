@@ -28,7 +28,7 @@ flowchart TD
     N --> O["근거 청크 반환<br/>page, heading, meta.ocr 포함"]
 ```
 
-## 초보자 설치 순서
+## 설치 순서
 
 아래 순서대로 한 번만 진행하면 됩니다. 설치와 연결은 터미널을 잠깐 쓰지만, 실제 사용은 Claude Desktop에서 합니다.
 
@@ -86,7 +86,7 @@ uv run rag-mcp doctor
 
 ## Claude Desktop에 연결하기
 
-여기가 가장 중요합니다. Claude Desktop은 MCP 서버를 설정 파일에 등록한 뒤 재시작해야 도구를 인식합니다.
+Claude Desktop은 MCP 서버를 설정 파일에 등록한 뒤 재시작해야 도구를 인식합니다.
 
 ### 1. 설정 파일 열기
 
