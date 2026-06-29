@@ -406,18 +406,40 @@ Claude Desktop에 MCP로 연결해 쓰는 동안에는 다른 터미널에서 `u
 
 또한 Claude Desktop이 서버를 켜 둔 동안에는 실행파일(`rag-mcp.exe`)이 잠겨 있어 다른 터미널의 `uv run ...`(예: `uv run pytest`)이 *파일이 사용 중* 오류로 실패할 수 있습니다. 이때는 Claude Desktop을 잠시 종료하거나, 가상환경 파이썬으로 직접 실행하세요: `./.venv/Scripts/python.exe -m pytest -q`.
 
-### 색인하면 무엇이 어디에 생기나
+### 프로젝트 전체 구조 (참고)
 
-`data\` 폴더 하나만 생기는 게 아닙니다. 역할별로 나누면 이렇게 됩니다.
+소스코드(◆ git 포함)와 색인 시 생성되는 산출물(✦ git 제외)이 한 폴더 안에 함께 있습니다. 다른 사람이 `git clone`하면 **◆만** 받고, ✦는 본인 PC에서 새로 생성됩니다(그래서 색인 데이터는 복제되지 않습니다).
 
 ```text
-# 프로젝트 폴더(--directory) 안
-data\parsed\{문서}\   ← 파싱 캐시(다시 파싱하지 않으려고 보관): json·md·문서 내 이미지·페이지 PNG·chunks
-data\qdrant\          ← 검색용 벡터 저장소(모든 문서가 함께 쓰는 단일 저장소)
-data\manifests\       ← 색인 목록·상태 원장(list_documents가 읽는 곳)
-.venv\                ← Python 가상환경(설치 시 1회 생성)
+RAG MCP\                          ← 프로젝트 루트(= --directory)
+│
+├─ src\rag_mcp\                   ◆ 소스코드 (25개 모듈)
+│   ├─ server.py                   FastMCP 진입점(도구 등록)
+│   ├─ service.py                  도구 7개 비즈니스 로직
+│   ├─ pipeline.py, pdf_parser.py, chunking.py, table_chunking.py   파싱·청킹
+│   ├─ embeddings.py, sparse.py, tokenizer.py                       임베딩·한국어 토큰화
+│   ├─ retrieval.py, vector_store.py                                검색·Qdrant
+│   ├─ ocr.py, ocr_triage.py, page_render.py                        OCR
+│   ├─ indexer.py, manifest.py, jobs.py, metadata.py, models.py     색인·상태·데이터모델
+│   └─ config.py, request_models.py, cli.py, doctor.py, evaluation.py
+│
+├─ tests\                         ◆ 테스트
+├─ eval\                          ◆ 평가용 데이터·스크립트
+├─ README.md, CLAUDE.md, PROGRESS.md, MCP_연동가이드.md, AGENTS.md   ◆ 문서
+├─ pyproject.toml, .env.example, .gitignore, uv.lock                ◆ 설정
+│
+├─ data\                          ✦ 색인할 때 생성 (git 제외)
+│   ├─ parsed\{문서}\              파싱 캐시: json·md·문서 내 이미지·페이지 PNG·chunks
+│   ├─ qdrant\                    검색용 벡터 저장소(모든 문서 공용)
+│   └─ manifests\{문서}.json      색인 목록·상태 원장(list_documents가 읽는 곳)
+│
+├─ .venv\                         ✦ Python 가상환경(설치 시 1회 생성)
+└─ .pytest_cache\                 ✦ 테스트 캐시
+```
 
-# 프로젝트 폴더 밖 — 사용자 홈 (가장 큰 용량)
+여기에 더해, 임베딩 모델은 **프로젝트 폴더 밖**(사용자 홈)에 받아집니다.
+
+```text
 C:\Users\{사용자}\.cache\huggingface\   ← 임베딩 모델 KURE-v1(수 GB)
 ```
 
