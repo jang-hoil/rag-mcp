@@ -166,19 +166,76 @@ Edit Config 클릭
 
 ### 4. 내 PC 경로가 다르면 바꿀 곳
 
-프로젝트 폴더가 다르면 이 부분을 바꿉니다.
+설정에서 바꿔야 하는 경로는 보통 2개입니다.
 
-```json
-"C:\\Users\\Owner\\Desktop\\RAG MCP"
-```
+| 바꿀 값 | 무엇인지 |
+|---|---|
+| `command` | `uv.exe`가 설치된 위치 |
+| `--directory` 다음 값 | 이 프로젝트 폴더 위치 |
 
-`uv.exe` 위치가 다르면 터미널에서 아래 명령으로 확인합니다.
+#### `uv.exe` 경로 확인 예시
+
+터미널에서 아래 명령을 실행합니다.
 
 ```bash
 where uv
 ```
 
-나온 경로 중 하나를 `command` 값에 넣으면 됩니다. JSON에서는 `\`를 `\\`처럼 두 번 써야 합니다.
+예를 들어 이렇게 나올 수 있습니다.
+
+```text
+C:\Users\Owner\AppData\Local\Programs\Python\Python313\Scripts\uv.exe
+C:\Users\Owner\.local\bin\uv.exe
+```
+
+둘 중 하나를 골라 `command` 값에 넣으면 됩니다. 보통 첫 번째 경로를 쓰면 됩니다.
+
+Windows 경로는 원래 이렇게 생겼습니다.
+
+```text
+C:\Users\Owner\AppData\Local\Programs\Python\Python313\Scripts\uv.exe
+```
+
+하지만 JSON 파일 안에서는 `\`를 그냥 한 번 쓰면 안 됩니다. `\`를 `\\`처럼 두 번 써야 합니다.
+
+그래서 JSON에는 이렇게 적습니다.
+
+```json
+"command": "C:\\Users\\Owner\\AppData\\Local\\Programs\\Python\\Python313\\Scripts\\uv.exe"
+```
+
+#### 프로젝트 폴더 경로 예시
+
+프로젝트가 실제로 아래 폴더에 있다면:
+
+```text
+C:\Users\Owner\Desktop\RAG MCP
+```
+
+JSON의 `args` 안에서는 이렇게 적습니다.
+
+```json
+"args": [
+  "--directory",
+  "C:\\Users\\Owner\\Desktop\\RAG MCP",
+  "run",
+  "rag-mcp",
+  "serve"
+]
+```
+
+즉, 실제 Windows 경로와 JSON에 적는 값은 이렇게 대응됩니다.
+
+| 실제 경로 | JSON에 적는 값 |
+|---|---|
+| `C:\Users\Owner\Desktop\RAG MCP` | `C:\\Users\\Owner\\Desktop\\RAG MCP` |
+| `C:\Users\Owner\AppData\Local\Programs\Python\Python313\Scripts\uv.exe` | `C:\\Users\\Owner\\AppData\\Local\\Programs\\Python\\Python313\\Scripts\\uv.exe` |
+
+흔한 실수:
+
+- `command`에 `where uv`라고 적으면 안 됩니다. `where uv`는 위치를 찾는 명령이고, JSON에는 찾은 결과 경로를 넣어야 합니다.
+- JSON에서 `C:\Users\...`처럼 한 번만 쓰면 오류가 날 수 있습니다. `C:\\Users\\...`처럼 두 번 써야 합니다.
+- 프로젝트 폴더 경로에 공백이 있어도 괜찮습니다. JSON 문자열 안에 넣으면 됩니다.
 
 ### 5. Claude Desktop 재시작
 
