@@ -64,6 +64,21 @@ class RagService:
                 self._retrievers[model] = Retriever(self.config, model, backend=self._backend, store=store)
             return self._retrievers[model]
 
+    def warmup(self, model: str | None = None) -> None:
+        """임베딩 모델·토크나이저를 미리 메모리에 올린다(첫 검색의 콜드 스타트 제거).
+
+        서버 기동(serve) 시 호출해 모델 로딩 비용을 startup으로 옮긴다. 이렇게 하면
+        첫 search_documents가 모델 로딩(정부망 캐시 로드로 수십 초)으로 MCP 타임아웃되지 않는다.
+        캐시되는 retriever의 backend를 그대로 데우므로 이후 실제 검색이 같은 인스턴스를 쓴다.
+        """
+        model = model or self.config.embedding_model
+        # 더미 임베딩으로 SentenceTransformer 실제 로드를 강제(lazy 트리거).
+        self._retriever(model).backend.embed_query("워밍업")
+        # Kiwi 토크나이저도 첫 호출 시 로딩되므로 함께 데운다(sparse 검색 콜드 스타트 제거).
+        from .sparse import to_sparse
+
+        to_sparse("워밍업")
+
     def _indexer(self, model: str) -> Indexer:
         with self._resource_lock:
             if model not in self._indexers:

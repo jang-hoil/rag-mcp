@@ -48,6 +48,16 @@ def test_search_documents_tool(svc):
     assert top["source"]["page_image"].endswith("p9.png")
 
 
+def test_warmup_loads_backend(svc):
+    """warmup()은 임베딩 백엔드와 토크나이저를 미리 데워 첫 검색 콜드 스타트를 없앤다."""
+    backend = svc._retriever("kure").backend  # 캐시되는 동일 인스턴스
+    calls: list[str] = []
+    orig = backend.embed_query
+    backend.embed_query = lambda text: (calls.append(text), orig(text))[1]
+    svc.warmup()
+    assert calls, "warmup이 임베딩 백엔드를 호출하지 않음"
+
+
 def test_search_invalid_mode_raises(svc):
     _seed(svc)
     with pytest.raises(ValueError):

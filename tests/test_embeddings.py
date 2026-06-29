@@ -10,7 +10,26 @@ import os
 
 import pytest
 
-from rag_mcp.embeddings import EmbeddingBackend, get_backend
+from rag_mcp.embeddings import EmbeddingBackend, _apply_offline_env, get_backend
+
+
+def test_apply_offline_env_default_on(monkeypatch):
+    """기본값은 오프라인 — HF 네트워크 조회를 끈다(정부망 4분 멈춤 방지)."""
+    monkeypatch.delenv("RAG_HF_OFFLINE", raising=False)
+    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+    monkeypatch.delenv("TRANSFORMERS_OFFLINE", raising=False)
+    assert _apply_offline_env() is True
+    assert os.environ["HF_HUB_OFFLINE"] == "1"
+    assert os.environ["TRANSFORMERS_OFFLINE"] == "1"
+
+
+def test_apply_offline_env_opt_out(monkeypatch):
+    """RAG_HF_OFFLINE=0이면 온라인 허용(최초 다운로드 등) — env를 건드리지 않는다."""
+    monkeypatch.setenv("RAG_HF_OFFLINE", "0")
+    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+    monkeypatch.delenv("TRANSFORMERS_OFFLINE", raising=False)
+    assert _apply_offline_env() is False
+    assert "HF_HUB_OFFLINE" not in os.environ
 
 
 def test_factory_unknown_model_raises():

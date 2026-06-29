@@ -380,6 +380,8 @@ Claude Desktop 중심으로 사용할 때는 자주 쓰지 않아도 되지만, 
 
 `uv run rag-mcp serve`는 점검용입니다. Claude Desktop에 연결해서 쓸 때는 사용자가 직접 켜 둘 필요가 없습니다.
 
+서버는 기동 시 임베딩 모델을 미리 메모리에 올립니다(워밍업). 이때 콘솔(stderr)에 `임베딩 모델 로딩 시작 → 로딩 완료 → 워밍업 완료 — 검색 준비됨` 로그가 순서대로 뜹니다. 이 로그가 보인 뒤부터 첫 검색도 콜드 스타트 지연 없이 즉시 응답합니다(로딩에 약 10초 내외 소요).
+
 ## 환경 변수
 
 필요하면 `.env.example`을 `.env`로 복사해 조정합니다. 별도 API 키는 필요 없습니다.
@@ -391,6 +393,7 @@ Claude Desktop 중심으로 사용할 때는 자주 쓰지 않아도 되지만, 
 | `RAG_QDRANT_PATH` | `./data/qdrant` | local 모드 저장 경로 |
 | `RAG_QDRANT_URL` | 없음 | server 모드 Qdrant URL |
 | `RAG_EMBEDDING_MODEL` | `kure` | `kure` 또는 `bge_m3` |
+| `RAG_HF_OFFLINE` | `1` | `1`이면 임베딩 모델을 로컬 캐시에서만 로드(HF 네트워크 조회 차단). 정부망 등에서 검색이 멈추는 것을 막는다. 모델을 처음 받을 때만 `0`으로 두고 1회 다운로드 |
 | `RAG_RENDER_DPI` | `200` | 표/페이지 이미지 렌더 DPI |
 | `RAG_OCR` | `auto` | `off`, `auto`, `force` |
 | `RAG_OCR_MIN_CHARS` | `30` | 스캔 PDF 판정 임계(페이지당 글자 수가 이 값 미만이면 빈약한 페이지) |

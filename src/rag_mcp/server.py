@@ -108,6 +108,20 @@ async def review_before_ingest(pdf_path: str) -> dict:
 
 
 def main() -> None:
+    import sys
+
+    # 서버 기동 시 임베딩 모델·토크나이저를 미리 로드(워밍업)한다. 첫 검색의 콜드 스타트
+    # (정부망에서 모델 로딩 → 수십 초~수 분 지연 → MCP 타임아웃)를 startup 비용으로 옮긴다.
+    # 워밍업이 실패해도 서버는 떠야 하므로 검색 시 재시도하도록 두고 경고만 남긴다.
+    try:
+        service().warmup()
+        print("[rag-mcp] 워밍업 완료 — 검색 준비됨", file=sys.stderr, flush=True)
+    except Exception as e:
+        print(
+            f"[rag-mcp] 워밍업 실패(검색 시 재시도): {type(e).__name__}: {e}",
+            file=sys.stderr,
+            flush=True,
+        )
     mcp.run()
 
 
