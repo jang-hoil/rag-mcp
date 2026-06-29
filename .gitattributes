@@ -1,0 +1,31 @@
+# 줄바꿈 정규화: 저장소에는 LF로 통일(체크아웃 시 OS 설정 따름)
+# Windows에서 LF↔CRLF 차이로 파일이 "변경됨"으로 뜨는 churn 방지
+
+# 기본: git이 텍스트/바이너리 자동 감지, 텍스트는 저장소 LF로 저장
+* text=auto
+
+# 소스·문서·설정 (저장소 LF 강제)
+*.py    text
+*.pyi   text
+*.md    text
+*.txt   text
+*.toml  text
+*.cfg   text
+*.ini   text
+*.json  text
+*.jsonl text
+*.yml   text
+*.yaml  text
+*.env   text
+*.lock  text
+.gitignore     text
+.gitattributes text
+
+# 바이너리 (줄바꿈 변환 금지)
+*.pdf  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.zip  binary
