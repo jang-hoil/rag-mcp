@@ -461,3 +461,7 @@ C:\Users\{사용자}\.cache\huggingface\   ← 임베딩 모델 KURE-v1(수 GB)
 
 - [MCP 사용자 빠른 시작](https://modelcontextprotocol.io/quickstart/user)
 - [MCP_연동가이드.md](./MCP_연동가이드.md)
+
+## 라이선스
+
+이 프로젝트는 [MIT License](./LICENSE)로 배포됩니다.
