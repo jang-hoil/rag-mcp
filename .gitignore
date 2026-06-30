@@ -18,3 +18,7 @@ data/manifests/
 
 # 환경
 .env
+
+# 실데이터 (실제 문서 내용·문서명 포함 — 공개 금지, .example만 커밋)
+eval/goldset.jsonl
+tests/fixtures/sample_parsed.json
