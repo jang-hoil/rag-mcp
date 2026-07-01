@@ -418,17 +418,22 @@ list_documents로 색인된 문서를 보여줘.
 
 ## MCP 도구 목록
 
-| 도구 | Claude Desktop에서 쓰는 상황 |
-|---|---|
-| `collection_status` | 연결 상태, 컬렉션 상태 확인 |
-| `review_before_ingest` | 새 PDF 넣기 전 기존 색인 목록 확인 |
-| `ingest_pdf` | PDF 색인 시작 |
-| `ingest_status` | PDF 색인 진행 상태 확인 |
-| `search_documents` | 질문으로 지침 검색 |
-| `list_documents` | 색인된 문서 목록 확인 |
-| `get_chunk` | 특정 청크 원문 확인 |
-| `delete_document` | 문서 삭제 |
-| `reindex_document` | 기존 문서 재색인 |
+정해진 주문(키워드)이 있는 게 아닙니다. Claude가 아래 "이렇게 말한다"의 **의도**를 읽고 알맞은 도구를 골라 호출합니다. 확실하게 하려면 **하고 싶은 일 + (원하면) 도구 이름**을 같이 말하면 됩니다.
+
+| 하고 싶은 일 | Claude Desktop에서 이렇게 말한다 | 불리는 도구 |
+|---|---|---|
+| 연결·상태 확인 | "collection_status 실행해서 상태 확인해줘" | `collection_status` |
+| 새 PDF 넣기 전 점검 | "이 PDF 색인 전에 review_before_ingest로 현재 목록 보여줘. 경로는 `C:\문서\2026예산.pdf`" | `review_before_ingest` |
+| PDF 색인 시작 | "이 PDF를 fiscal_year 2026으로 색인해줘. 경로는 `C:\문서\2026예산.pdf`" | `ingest_pdf` |
+| 색인 진행 확인 | "방금 job_id로 진행 상태 확인해줘" | `ingest_status` |
+| 검색(질문) | "2026 예산 지침에서 일상경비 한도 찾아줘. 근거 페이지도 같이" | `search_documents` |
+| 문서 목록 보기 | "색인된 문서 목록 보여줘" | `list_documents` |
+| 특정 청크 원문 | "이 chunk_id 원문 보여줘" | `get_chunk` |
+| 문서 삭제 | "이 문서 삭제해줘, confirm=True로" | `delete_document` |
+| 재색인 | "이 문서 reindex_document로 다시 색인해줘" | `reindex_document` |
+
+> 큰 PDF 색인은 **2단계**입니다. `ingest_pdf`가 즉시 `job_id`만 돌려주고, 실제 색인은 백그라운드에서 진행됩니다. 그래서 "색인 시작 → job_id로 진행 확인"으로 나눠 말하게 됩니다.
+> 삭제는 실수 방지를 위해 **`confirm=True`**를 함께 말해야 실제로 실행됩니다.
 
 ## OCR 동작 방식
 
