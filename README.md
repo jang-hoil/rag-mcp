@@ -28,6 +28,85 @@ flowchart TD
     N --> O["근거 청크 반환<br/>page, heading, meta.ocr 포함"]
 ```
 
+## 초보자용 빠른 설치 (Windows, 복붙 순서)
+
+처음이라면 이 순서만 그대로 따라 하면 됩니다. **명령은 한 줄씩** 복사해서 실행하세요. (아래 [설치 순서](#설치-순서)는 각 단계를 더 자세히 설명한 참고용입니다.)
+
+> 이 과정은 **바탕화면에 `RAG MCP`라는 폴더**(원하면 다른 이름도 가능)를 만들고, 그 안에 코드를 내려받는 방식입니다. 폴더를 미리 손으로 만들 필요는 없고, 아래 2번의 `git clone` 명령이 **폴더까지 자동으로 만들어** 줍니다.
+
+### 1. 도구 설치
+
+**새 cmd 창**을 열고 아래를 한 줄씩 실행합니다.
+
+```bat
+winget install --id Git.Git -e
+winget install --id Python.Python.3.11 -e
+winget install --id astral-sh.uv -e
+```
+
+> 설치가 끝나면 **cmd 창을 닫고 새로 여세요.** 그래야 방금 설치한 `git`, `uv` 명령을 인식합니다.
+
+### 2. 코드 받기 (바탕화면에 폴더 생성)
+
+```bat
+cd /d "%USERPROFILE%\Desktop"
+git clone https://github.com/jang-hoil/rag-mcp.git "RAG MCP"
+cd "RAG MCP"
+```
+
+- 첫 줄: 바탕화면으로 이동합니다.
+- 둘째 줄: 바탕화면에 **`RAG MCP` 폴더를 새로 만들고** 그 안에 코드를 내려받습니다. 다른 이름을 쓰고 싶으면 맨 끝의 `"RAG MCP"`만 원하는 이름으로 바꾸세요 (예: `"내RAG"`). 그러면 그 이름의 폴더가 생깁니다.
+- 셋째 줄: 방금 만들어진 폴더 안으로 들어갑니다.
+
+### 3. 설치 (이 한 줄이 전부)
+
+```bat
+uv sync
+```
+
+> 처음에는 임베딩 모델을 받느라 몇 분 걸릴 수 있습니다. 한 번 받으면 다음부터는 빠릅니다.
+
+### 4. Claude Desktop에 등록
+
+먼저 `uv` 위치를 확인합니다.
+
+```bat
+where uv
+```
+
+Claude Desktop → **Settings → Developer → Edit Config**를 열고 아래를 붙여넣습니다. **굵게 표시한 두 곳만** 본인 값으로 바꾸세요.
+
+```json
+{
+  "mcpServers": {
+    "rag-mcp": {
+      "command": "여기에 where uv 결과 경로",
+      "args": [
+        "--directory",
+        "여기에 RAG MCP 폴더 경로",
+        "run",
+        "rag-mcp",
+        "serve"
+      ]
+    }
+  }
+}
+```
+
+> 경로의 `\`는 **반드시 `\\`처럼 두 번** 씁니다. 예: `C:\\Users\\Owner\\Desktop\\RAG MCP`
+>
+> 이 두 경로를 바꾸는 방법은 아래 [4. 내 PC 경로가 다르면 바꿀 곳](#4-내-pc-경로가-다르면-바꿀-곳)에 그림처럼 자세히 나와 있습니다.
+
+### 5. Claude Desktop 껐다 켜기 → 끝!
+
+Claude Desktop을 **완전히 종료**하고 다시 실행하면 연결됩니다. 확인은 Claude Desktop에서 이렇게 물어보세요.
+
+```text
+collection_status 실행해서 상태 확인해줘.
+```
+
+---
+
 ## 설치 순서
 
 아래 순서대로 한 번만 진행하면 됩니다. 설치와 연결은 터미널을 잠깐 쓰지만, 실제 사용은 Claude Desktop에서 합니다.
