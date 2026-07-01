@@ -10,7 +10,12 @@ import os
 
 import pytest
 
-from rag_mcp.embeddings import EmbeddingBackend, _apply_offline_env, get_backend
+from rag_mcp.embeddings import (
+    EmbeddingBackend,
+    _apply_offline_env,
+    _SentenceTransformerBackend,
+    get_backend,
+)
 
 
 def test_apply_offline_env_default_on(monkeypatch):
@@ -45,6 +50,44 @@ def test_factory_returns_backend_with_dim():
     assert b.dimension == 1024
     # lazy: 아직 모델 미로딩
     assert b._model is None
+
+
+def test_model_loads_once_under_concurrency():
+    """동시 검색·워밍업이 몰려도 모델은 단 한 번만 로딩돼야 한다(싱글톤 락).
+
+    락이 없으면 각 스레드가 독립적으로 무거운 로딩을 시작해(로그의 '임베딩 모델 로딩 시작' 3중)
+    메모리·디스크 경합으로 로딩이 수 분으로 늘고, 취소된 요청이 서버를 죽였다. 로딩 창을 Barrier로
+    강제로 벌려 락이 없으면 load_count가 2 이상 쌓이도록 만든다."""
+    import threading
+    import time
+
+    class _CountingBackend(_SentenceTransformerBackend):
+        def __init__(self):
+            super().__init__("kure")
+            self.load_count = 0
+
+        def _load_model(self):
+            self.load_count += 1
+            time.sleep(0.15)  # 경합 창 확보(락 없으면 여러 스레드가 여기 동시 진입)
+            return object()  # 실제 모델 대신 더미(로딩 1회성만 검증)
+
+    backend = _CountingBackend()
+    n = 6
+    barrier = threading.Barrier(n)
+    results: list = []
+
+    def worker():
+        barrier.wait()
+        results.append(backend._ensure_model())
+
+    threads = [threading.Thread(target=worker) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert backend.load_count == 1, f"모델이 {backend.load_count}번 로딩됨(싱글톤 락 실패)"
+    assert len({id(r) for r in results}) == 1, "스레드마다 다른 모델 인스턴스를 받음"
 
 
 _HAS_ST = importlib.util.find_spec("sentence_transformers") is not None

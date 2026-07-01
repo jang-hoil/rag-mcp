@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from abc import ABC, abstractmethod
 
 from .config import DIMENSION_BY_MODEL, HF_ID_BY_MODEL
@@ -53,47 +54,64 @@ class _SentenceTransformerBackend(EmbeddingBackend):
         self.dimension = DIMENSION_BY_MODEL[name]
         self._hf_id = HF_ID_BY_MODEL[name]
         self._model = None  # lazy
+        # 모델 로딩은 무겁다(웜 ~2-3s, 콜드 시 수십 초~수 분). 락 없이 두면 백그라운드
+        # 워밍업 스레드와 검색 스레드가 동시에 각자 로딩해 메모리·디스크 경합으로 로딩이 수 분으로
+        # 늘어난다. 그 사이 요청이 4분 타임아웃으로 취소되면, 취소 불가(non-cancellable)로 오프로딩된
+        # 워커 스레드가 끝까지 돌다 이미 응답된 요청에 재응답 → MCP 세션이 AssertionError로 죽는다.
+        # → 로딩을 단 1회로 직렬화한다(다른 스레드는 그 1회를 기다렸다가 즉시 진행).
+        self._load_lock = threading.Lock()
+
+    def _load_model(self):
+        """실제 SentenceTransformer 로딩(테스트에서 오버라이드 가능). _ensure_model만 호출한다."""
+        import sys
+        import time
+
+        # HF 네트워크 조회 차단(캐시만 사용) — sentence_transformers import 전에 적용해야 한다.
+        offline = _apply_offline_env()
+        # 정부망 MITM 프록시(self-signed 인증서)에서 HF 다운로드 SSL 검증 실패 우회:
+        # Windows 인증서 저장소(프록시 루트 CA 등록됨)를 Python SSL에 주입한다.
+        # truststore 미설치 시 무시(오프라인 캐시만으로 동작 가능).
+        try:
+            import truststore
+
+            truststore.inject_into_ssl()
+        except ImportError:
+            pass
+
+        from sentence_transformers import SentenceTransformer
+
+        # GPU 없는 환경 확정 → device="cpu" 명시(불필요한 CUDA 초기화 시도 제거).
+        print(
+            f"[rag-mcp] 임베딩 모델 로딩 시작: {self.name} ({self._hf_id}) "
+            f"device=cpu HF오프라인={offline}",
+            file=sys.stderr,
+            flush=True,
+        )
+        t0 = time.monotonic()
+        model = SentenceTransformer(self._hf_id, device="cpu")
+        # 차원 검증 (저장·검색 정합 보장) — 검증 통과한 모델만 self._model에 발행한다.
+        got = model.get_sentence_embedding_dimension()
+        if got != self.dimension:
+            raise RuntimeError(
+                f"{self.name} 차원 불일치: 기대 {self.dimension}, 실제 {got}"
+            )
+        print(
+            f"[rag-mcp] 임베딩 모델 로딩 완료: {self.name} ({time.monotonic() - t0:.1f}s)",
+            file=sys.stderr,
+            flush=True,
+        )
+        return model
 
     def _ensure_model(self):
-        if self._model is None:
-            import sys
-            import time
-
-            # HF 네트워크 조회 차단(캐시만 사용) — sentence_transformers import 전에 적용해야 한다.
-            offline = _apply_offline_env()
-            # 정부망 MITM 프록시(self-signed 인증서)에서 HF 다운로드 SSL 검증 실패 우회:
-            # Windows 인증서 저장소(프록시 루트 CA 등록됨)를 Python SSL에 주입한다.
-            # truststore 미설치 시 무시(오프라인 캐시만으로 동작 가능).
-            try:
-                import truststore
-
-                truststore.inject_into_ssl()
-            except ImportError:
-                pass
-
-            from sentence_transformers import SentenceTransformer
-
-            # GPU 없는 환경 확정 → device="cpu" 명시(불필요한 CUDA 초기화 시도 제거).
-            print(
-                f"[rag-mcp] 임베딩 모델 로딩 시작: {self.name} ({self._hf_id}) "
-                f"device=cpu HF오프라인={offline}",
-                file=sys.stderr,
-                flush=True,
-            )
-            t0 = time.monotonic()
-            self._model = SentenceTransformer(self._hf_id, device="cpu")
-            # 차원 검증 (저장·검색 정합 보장)
-            got = self._model.get_sentence_embedding_dimension()
-            if got != self.dimension:
-                raise RuntimeError(
-                    f"{self.name} 차원 불일치: 기대 {self.dimension}, 실제 {got}"
-                )
-            print(
-                f"[rag-mcp] 임베딩 모델 로딩 완료: {self.name} ({time.monotonic() - t0:.1f}s)",
-                file=sys.stderr,
-                flush=True,
-            )
-        return self._model
+        # 핫패스: 이미 로드됐으면 락 없이 즉시 반환.
+        model = self._model
+        if model is not None:
+            return model
+        # 콜드패스: 락으로 로딩을 1회로 직렬화(double-checked locking).
+        with self._load_lock:
+            if self._model is None:
+                self._model = self._load_model()
+            return self._model
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if not texts:

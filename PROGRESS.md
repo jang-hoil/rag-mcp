@@ -142,6 +142,23 @@
 - **테스트 2건 추가**(preflight 중복 감지 / main이 busy 시 SystemExit(0)). README 운영·워밍업 서술 갱신.
 - **즉시 조치**: 관찰된 중복 트리(나중 것, uv PID 28508) `taskkill /T /F`로 정리 — serve 트리 1개만 남김.
 
+### ✅ 완료 (2026-07-01) — 임베딩 모델 로딩 싱글톤 락 (동시 3중 로딩·취소 크래시 근본 차단)
+- **증상(로그 확정, 7/1 18:33~18:42 = 수정된 새 코드 세션에서 발생)**: 검색(id=5)이 4분 넘게 무응답 →
+  클라이언트 취소 → 직후 `임베딩 모델 로딩 시작`이 **3번 동시**(무락 3중 로딩, 2.5/4.4/6.0s 제각각) →
+  취소된 요청에 워커 스레드가 뒤늦게 재응답 → `AssertionError: Request already responded to` → 서버 크래시.
+- **근본 원인(코드 확정)**: `embeddings.py._ensure_model`이 `if self._model is None: load`로 **락이 없어**
+  백그라운드 워밍업 스레드와 검색 스레드가 동시에 각자 로딩. 콜드 로딩 + 경합으로 수 분 → 4분 타임아웃 →
+  `anyio.to_thread`가 **취소 불가(non-cancellable)**라 스레드가 끝까지 돌다 재응답 → 크래시.
+- **수정(테스트 먼저 → 전체 통과 → 커밋)**:
+  1. `embeddings.py`: 실제 로딩을 `_load_model()`로 분리(테스트 오버라이드 가능) + `_ensure_model`에
+     `threading.Lock` **double-checked locking**. 핫패스는 락 없이 즉시 반환, 콜드패스만 1회 직렬화.
+  2. 검증 통과한 모델만 `self._model`에 발행(차원 검증 실패 시 반쪽 모델이 남지 않음).
+  3. 테스트 1건: Barrier로 6스레드 동시 진입시켜 `load_count==1`(락 없으면 다중) 검증.
+- **효과**: 콜드 로딩 중 검색은 두 번째 로딩을 시작하지 않고 그 1회를 기다림 → 대기가 "단일 로딩 시간"으로
+  한정 → 취소·재응답 크래시 연쇄 차단. 다른 Claude 세션의 "3중 로딩" 진단은 시점은 섞였으나 핵심은 정확.
+- **남은 잔여 위험(낮음)**: 극단적 콜드 로딩이 4분을 넘기면 이론상 취소 크래시 가능 → 필요 시 warmup 준비
+  게이트(모델 미준비 시 "준비 중" 즉시 반환)로 추가 방어 가능. 이번 범위엔 미포함.
+
 ## 구현된 모듈 지도 (참고)
 - `config.py` 모델별 컬렉션/차원 · `models.py` Chunk/SearchResult/Manifest
 - `tokenizer.py`(코드/금액 보존)+`sparse.py`(blake2b idx, tf, IDF modifier 전제)
