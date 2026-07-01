@@ -109,19 +109,43 @@ async def review_before_ingest(pdf_path: str) -> dict:
 
 def main() -> None:
     import sys
+    import threading
 
-    # 서버 기동 시 임베딩 모델·토크나이저를 미리 로드(워밍업)한다. 첫 검색의 콜드 스타트
-    # (정부망에서 모델 로딩 → 수십 초~수 분 지연 → MCP 타임아웃)를 startup 비용으로 옮긴다.
-    # 워밍업이 실패해도 서버는 떠야 하므로 검색 시 재시도하도록 두고 경고만 남긴다.
+    from .vector_store import StorageBusyError
+
+    svc = service()
+
+    # 단일 인스턴스 가드: Qdrant local 저장소를 먼저 연다(빠름 — 임베딩 로드 없음).
+    # 이미 다른 인스턴스가 락을 쥐고 있으면(= Claude Desktop이 중복 spawn) 좀비로 남지 않고
+    # 조용히 종료한다. exit(0): 의도적으로 물러난 것이라 호스트가 오류로 취급하지 않게 한다.
     try:
-        service().warmup()
-        print("[rag-mcp] 워밍업 완료 — 검색 준비됨", file=sys.stderr, flush=True)
-    except Exception as e:
+        svc.preflight()
+    except StorageBusyError:
         print(
-            f"[rag-mcp] 워밍업 실패(검색 시 재시도): {type(e).__name__}: {e}",
+            "[rag-mcp] 다른 인스턴스가 이미 실행 중입니다 — 이 인스턴스는 종료합니다(중복 방지).",
             file=sys.stderr,
             flush=True,
         )
+        sys.exit(0)
+
+    # 워밍업(임베딩 모델·토크나이저 로드, 10초~수 분)은 백그라운드 스레드로 돌린다.
+    # 이유(중요): warmup이 startup을 막으면 서버가 MCP initialize에 즉시 응답 못 해
+    # Claude Desktop이 "죽었다" 판단하고 기존 프로세스를 남긴 채 새 인스턴스를 추가 spawn
+    # (= 중복의 근본 트리거)한다. mcp.run()을 먼저 태워 initialize에 바로 응답시킨다.
+    # 검색이 워밍업 완료 전에 오면 _retriever(RLock 보호)가 그 시점에 모델을 로드한다
+    # (기존 "첫 검색 콜드 스타트"와 동일 — 정합성 문제 없음).
+    def _warmup() -> None:
+        try:
+            svc.warmup()
+            print("[rag-mcp] 워밍업 완료 — 검색 준비됨", file=sys.stderr, flush=True)
+        except Exception as e:
+            print(
+                f"[rag-mcp] 워밍업 실패(검색 시 재시도): {type(e).__name__}: {e}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    threading.Thread(target=_warmup, name="warmup", daemon=True).start()
     mcp.run()
 
 

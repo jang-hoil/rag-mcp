@@ -18,6 +18,14 @@ from .models import Chunk
 from .request_models import FilterValue
 from .sparse import to_sparse
 
+class StorageBusyError(RuntimeError):
+    """Qdrant local 저장소를 다른 프로세스가 이미 열고 있을 때(단일 writer 위반).
+
+    RuntimeError 서브클래스라 기존 `except RuntimeError` 경로와 호환되면서도,
+    server.py의 단일 인스턴스 가드는 이 타입으로 "중복 실행"만 정확히 골라낼 수 있다.
+    """
+
+
 # chunk_id → 안정 포인트 UUID (재색인 멱등)
 _NAMESPACE = uuid.UUID("a7f3c1e2-0b4d-4e6a-9c8f-1234567890ab")
 
@@ -48,7 +56,7 @@ class VectorStore:
                 # Qdrant local은 단일 프로세스만 저장소를 열 수 있다(스펙 §1.3 파일락).
                 # serve(MCP)가 떠 있는 동안 CLI ingest 등을 동시 실행하면 여기서 막힌다.
                 if "already accessed" in str(e):
-                    raise RuntimeError(
+                    raise StorageBusyError(
                         f"Qdrant local 저장소({config.qdrant_path})가 다른 프로세스에서 사용 중입니다. "
                         "MCP serve가 실행 중이면 종료한 뒤 다시 시도하세요"
                         "(local path 모드는 동시 접근 불가 — 동시 사용이 필요하면 server 모드 사용)."

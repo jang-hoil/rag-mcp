@@ -5,7 +5,7 @@ import pytest
 
 from rag_mcp.config import Config
 from rag_mcp.models import Chunk
-from rag_mcp.vector_store import VectorStore, point_id_for
+from rag_mcp.vector_store import StorageBusyError, VectorStore, point_id_for
 
 
 def _chunk(cid, text, fy, **kw):
@@ -87,7 +87,10 @@ def test_local_storage_lock_friendly_error(store):
     # store fixture가 이미 local path 락 점유 → 같은 경로 두 번째 오픈은 친절한 한국어 에러로
     # (serve 중 CLI ingest 동시 실행 방어 — 스펙 §1.3 파일락)
     cfg = Config()
-    with pytest.raises(RuntimeError, match="사용 중"):
+    # StorageBusyError로 던지되(server.py 단일 인스턴스 가드가 타입으로 감지),
+    # RuntimeError 서브클래스라 기존 except RuntimeError 경로와도 호환된다.
+    assert issubclass(StorageBusyError, RuntimeError)
+    with pytest.raises(StorageBusyError, match="사용 중"):
         VectorStore(cfg, embedding_model="kure")
 
 

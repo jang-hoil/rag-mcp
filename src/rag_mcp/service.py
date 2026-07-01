@@ -64,6 +64,17 @@ class RagService:
                 self._retrievers[model] = Retriever(self.config, model, backend=self._backend, store=store)
             return self._retrievers[model]
 
+    def preflight(self, model: str | None = None) -> None:
+        """Qdrant local 저장소를 즉시 열어 단일 인스턴스 여부를 판정한다(락 선점).
+
+        server 기동 초반에 메인 스레드에서 동기 호출한다. 다른 프로세스가 이미 local
+        저장소를 쥐고 있으면 VectorStore.__init__가 StorageBusyError를 던지며, server.py는
+        이를 받아 중복 인스턴스를 조용히 종료한다. 무거운 임베딩 로드는 하지 않으므로
+        (backend는 lazy) 밀리초 단위로 끝나 startup을 막지 않는다. 여기서 캐시된 store는
+        이후 warmup·검색이 그대로 재사용한다(같은 Qdrant client 공유 — 중복 open 없음).
+        """
+        self._retriever(model or self.config.embedding_model)
+
     def warmup(self, model: str | None = None) -> None:
         """임베딩 모델·토크나이저를 미리 메모리에 올린다(첫 검색의 콜드 스타트 제거).
 

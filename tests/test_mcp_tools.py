@@ -311,6 +311,40 @@ def test_server_imports_and_registers_tools():
     } <= names
 
 
+def test_preflight_detects_duplicate_instance(svc, fake_backend):
+    """단일 인스턴스 가드: 같은 Qdrant local 경로를 두 번째 인스턴스가 preflight하면
+    StorageBusyError가 나야 한다(server.py가 이걸 받아 중복 인스턴스를 종료)."""
+    from rag_mcp.vector_store import StorageBusyError
+
+    svc.preflight()  # 첫 인스턴스가 local 저장소 락 선점(임베딩 로드 없이 빠르게)
+    dup = RagService(Config(), backend=fake_backend)  # svc와 같은 RAG_QDRANT_PATH
+    with pytest.raises(StorageBusyError):
+        dup.preflight()
+
+
+def test_server_main_exits_when_storage_busy(monkeypatch):
+    """중복 인스턴스는 좀비로 남지 않고 exit(0)으로 조용히 물러난다."""
+    from rag_mcp import server
+    from rag_mcp.vector_store import StorageBusyError
+
+    monkeypatch.setattr(server, "_service", None)
+
+    class _BusySvc:
+        def preflight(self):
+            raise StorageBusyError("사용 중")
+
+        def warmup(self):  # 도달하면 안 됨
+            raise AssertionError("preflight 실패 시 warmup을 부르면 안 됨")
+
+    monkeypatch.setattr(server, "service", lambda: _BusySvc())
+    # mcp.run()까지 가면 안 됨 — 도달 시 즉시 실패
+    monkeypatch.setattr(server.mcp, "run", lambda: (_ for _ in ()).throw(AssertionError("mcp.run 도달")))
+
+    with pytest.raises(SystemExit) as ei:
+        server.main()
+    assert ei.value.code == 0
+
+
 def test_server_ingest_pdf_tool_returns_job(tmp_path, monkeypatch):
     """server.ingest_pdf 도구는 (동기 색인이 아니라) 즉시 job을 반환해야 함."""
     import asyncio

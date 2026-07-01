@@ -126,6 +126,22 @@
 - **하드룰 준수**: 삭제·색인·파이프라인 미수정. `list_documents` 헬퍼 재사용(중복 없음).
 - **문서 반영(커밋 `985a050`)**: README.md·MCP_연동가이드.md 도구 표 8→9개.
 
+### ✅ 완료 (2026-07-01) — 서버 중복 실행 근본 차단
+- **증상(재발)**: Claude Desktop이 `rag-mcp serve`를 동시에 2개 spawn(부모 PID 동일 = Claude Desktop) →
+  Qdrant local 파일락 충돌로 색인·검색(쓰기/Qdrant 접근) 멈춤. `list_documents`(manifest만 읽음)는 동작.
+- **근본 원인 2가지(코드 확정)**:
+  1. `server.main()`이 `warmup()`(모델 수 GB 로드, 10초~수 분)을 **끝낸 뒤에야** `mcp.run()` 호출 →
+     그동안 MCP initialize 미응답 → Claude Desktop이 "죽었다" 판단하고 기존 프로세스 남긴 채 추가 spawn.
+  2. 나중 인스턴스가 warmup에서 락 에러를 만나도 "워밍업 실패"로 삼키고 **좀비로 생존** → 락 경합 유지.
+- **수정(테스트 먼저 → 전체 통과 → 커밋)**:
+  1. `vector_store.py`: `StorageBusyError(RuntimeError)` 신규 — 락 충돌을 타입으로 감지(문자열 매칭 대신).
+     기존 `except RuntimeError`·`test_local_storage_lock_friendly_error`와 호환(서브클래스).
+  2. `service.py`: `RagService.preflight()` — Qdrant local을 즉시 open해 단일 인스턴스 판정(임베딩 로드 없이 빠름).
+  3. `server.py`: main()을 **preflight(동기·메인스레드) → StorageBusyError면 exit(0) → warmup은 백그라운드
+     스레드 → mcp.run()** 순으로 재작성. startup 비블로킹으로 중복 spawn 트리거 제거 + 중복 시 자진 종료.
+- **테스트 2건 추가**(preflight 중복 감지 / main이 busy 시 SystemExit(0)). README 운영·워밍업 서술 갱신.
+- **즉시 조치**: 관찰된 중복 트리(나중 것, uv PID 28508) `taskkill /T /F`로 정리 — serve 트리 1개만 남김.
+
 ## 구현된 모듈 지도 (참고)
 - `config.py` 모델별 컬렉션/차원 · `models.py` Chunk/SearchResult/Manifest
 - `tokenizer.py`(코드/금액 보존)+`sparse.py`(blake2b idx, tf, IDF modifier 전제)
