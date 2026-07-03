@@ -49,12 +49,22 @@ def table_grid_text(table: dict[str, Any]) -> str:
 def _merge_tables(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
     """페이지 넘김으로 쪼개진 표를 하나의 가상 table 블록으로 병합."""
     rows_a = list(a.get("rows", []) or [])
-    rows_b = list(b.get("rows", []) or [])
+    na = int(a.get("number of rows") or len(rows_a))
+    # b 셀의 row number는 1부터 다시 시작하므로 a의 행 수만큼 밀어야
+    # table_grid_text 격자에서 a의 행을 덮어쓰지 않는다.
+    # 원본 파스 트리 변형 금지 → 행/셀 dict는 복사 후 갱신.
+    rows_b: list[dict[str, Any]] = []
+    for row in b.get("rows", []) or []:
+        cells = []
+        for cell in row.get("cells", []) or []:
+            if cell.get("row number") is not None:
+                cell = {**cell, "row number": int(cell["row number"]) + na}
+            cells.append(cell)
+        rows_b.append({**row, "cells": cells})
     return {
         "type": "table",
         "page number": a.get("page number"),
-        "number of rows": int(a.get("number of rows") or len(rows_a))
-        + int(b.get("number of rows") or len(rows_b)),
+        "number of rows": na + int(b.get("number of rows") or len(rows_b)),
         "number of columns": a.get("number of columns"),
         "rows": rows_a + rows_b,
     }

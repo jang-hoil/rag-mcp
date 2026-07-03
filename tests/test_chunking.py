@@ -61,6 +61,28 @@ def test_merge_cross_page_tables_same_columns():
     assert merged[0]["number of rows"] == 4
 
 
+def test_merge_cross_page_tables_keeps_both_pages_rows():
+    """병합 표 텍스트에 두 페이지 내용이 모두 남아야 한다.
+
+    두 번째 표 셀의 row number(1부터 재시작)를 오프셋하지 않으면 격자에서
+    첫 표의 행을 덮어써 앞 페이지 데이터가 색인에서 사라진다(회귀 방지).
+    """
+    t1 = _table(2, 2, [(1, 1, "과목"), (1, 2, "예산액"), (2, 1, "201-01"), (2, 2, "1,000")], page=5)
+    t2 = _table(2, 2, [(1, 1, "202-01"), (1, 2, "2,000"), (2, 1, "203-01"), (2, 2, "3,000")], page=6)
+    merged = merge_cross_page_tables([t1, t2])
+    assert len(merged) == 1
+    text = table_grid_text(merged[0])
+    rows = text.split("\n")
+    assert rows == [
+        "과목\t예산액",
+        "201-01\t1,000",
+        "202-01\t2,000",
+        "203-01\t3,000",
+    ]
+    # 병합이 원본 블록을 변형하면 안 된다(같은 파스 트리 재사용 대비)
+    assert t2["rows"][0]["cells"][0]["row number"] == 1
+
+
 def test_split_long_text_overlap():
     text = "가" * (BODY_MAX + 50)
     parts = split_long_text(text)
