@@ -19,6 +19,24 @@ from .sparse import to_sparse
 from .vector_store import VectorStore
 
 
+def _source_from_payload(payload: dict) -> SearchSource:
+    """Qdrant payload → SearchSource (스펙 §5 스키마). needs_image일 때만 page_image 노출."""
+    return SearchSource(
+        document_id=payload.get("document_id", ""),
+        doc_name=payload.get("doc_name"),
+        fiscal_year=payload.get("fiscal_year"),
+        source_path=payload.get("source_path"),
+        page=payload.get("page"),
+        heading_path=payload.get("heading_path") or [],
+        is_table=bool(payload.get("is_table")),
+        has_amount=bool(payload.get("has_amount")),
+        has_code=bool(payload.get("has_code")),
+        needs_image=bool(payload.get("needs_image")),
+        page_image=payload.get("page_image") if payload.get("needs_image") else None,
+        meta=payload.get("meta") or {},
+    )
+
+
 class Retriever:
     def __init__(
         self,
@@ -74,26 +92,12 @@ class Retriever:
             if q_sparse_idx & set(doc_idx):
                 matched_by.append("sparse")
 
-        source = SearchSource(
-            document_id=payload.get("document_id", ""),
-            doc_name=payload.get("doc_name"),
-            fiscal_year=payload.get("fiscal_year"),
-            source_path=payload.get("source_path"),
-            page=payload.get("page"),
-            heading_path=payload.get("heading_path") or [],
-            is_table=bool(payload.get("is_table")),
-            has_amount=bool(payload.get("has_amount")),
-            has_code=bool(payload.get("has_code")),
-            needs_image=bool(payload.get("needs_image")),
-            page_image=payload.get("page_image") if payload.get("needs_image") else None,
-            meta=payload.get("meta") or {},
-        )
         return SearchResult(
             chunk_id=payload.get("chunk_id", str(p.id)),
             text=payload.get("text", ""),
             score=float(p.score),
             matched_by=matched_by,
-            source=source,
+            source=_source_from_payload(payload),
         )
 
     def get_chunk(self, chunk_id: str) -> SearchResult | None:
@@ -102,21 +106,7 @@ class Retriever:
         if rec is None:
             return None
         payload = rec.payload or {}
-        source = SearchSource(
-            document_id=payload.get("document_id", ""),
-            doc_name=payload.get("doc_name"),
-            fiscal_year=payload.get("fiscal_year"),
-            source_path=payload.get("source_path"),
-            page=payload.get("page"),
-            heading_path=payload.get("heading_path") or [],
-            is_table=bool(payload.get("is_table")),
-            has_amount=bool(payload.get("has_amount")),
-            has_code=bool(payload.get("has_code")),
-            needs_image=bool(payload.get("needs_image")),
-            page_image=payload.get("page_image") if payload.get("needs_image") else None,
-            meta=payload.get("meta") or {},
-        )
         return SearchResult(
             chunk_id=chunk_id, text=payload.get("text", ""), score=1.0,
-            matched_by=[], source=source,
+            matched_by=[], source=_source_from_payload(payload),
         )

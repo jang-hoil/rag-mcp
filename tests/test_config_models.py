@@ -1,7 +1,7 @@
 """config.py / models.py 기반 모듈 테스트."""
 import os
 
-from rag_mcp.config import Config, COLLECTION_BY_MODEL
+from rag_mcp.config import Config
 from rag_mcp.models import Chunk, Manifest, SearchResult, SearchSource
 
 
@@ -33,8 +33,6 @@ def test_derived_paths(tmp_path):
         assert cfg.parsed_doc_dir("doc1") == tmp_path.resolve() / "parsed" / "doc1"
         assert cfg.pages_dir("doc1").name == "pages"
         assert cfg.manifest_path("doc1").name == "doc1.json"
-        cfg.ensure_dirs()
-        assert cfg.parsed_dir.exists() and cfg.manifests_dir.exists()
     finally:
         del os.environ["RAG_DATA_DIR"]
 
@@ -57,10 +55,8 @@ def test_chunk_payload_roundtrip():
     payload = c.payload()
     assert payload["fiscal_year"] == 2026
     assert payload["is_table"] is True
-    restored = Chunk.from_payload(payload)
-    assert restored.chunk_id == c.chunk_id
-    assert restored.heading_path == c.heading_path
-    assert restored.needs_image is True
+    assert payload["heading_path"] == c.heading_path
+    assert payload["needs_image"] is True
 
 
 def test_search_result_schema():

@@ -80,12 +80,6 @@ class Config:
         model = embedding_model or self.embedding_model
         return DIMENSION_BY_MODEL[model]
 
-    def ensure_dirs(self) -> None:
-        """필요한 데이터 디렉터리를 생성한다."""
-        for d in (self.data_dir, self.parsed_dir, self.manifests_dir, self.qdrant_path):
-            d.mkdir(parents=True, exist_ok=True)
-
-
 def load_config() -> Config:
     return Config()
 

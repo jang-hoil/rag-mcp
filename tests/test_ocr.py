@@ -1,6 +1,4 @@
 """ocr — needs_image PNG 보강 + Fake backend."""
-from pathlib import Path
-
 from rag_mcp.config import Config
 from rag_mcp.models import Chunk
 from rag_mcp.ocr import FakeOcrBackend, augment_chunks_with_ocr

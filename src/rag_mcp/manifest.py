@@ -7,7 +7,6 @@
 """
 from __future__ import annotations
 
-import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,9 +26,6 @@ class ManifestStore:
 
     def path(self, document_id: str) -> Path:
         return self.config.manifest_path(document_id)
-
-    def exists(self, document_id: str) -> bool:
-        return self.path(document_id).exists()
 
     def read(self, document_id: str) -> Optional[Manifest]:
         p = self.path(document_id)

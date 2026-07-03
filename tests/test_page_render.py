@@ -1,7 +1,6 @@
 """page_render 테스트 — pymupdf로 실제 PDF 페이지 PNG 생성."""
 from __future__ import annotations
 
-import glob
 from pathlib import Path
 
 import pytest

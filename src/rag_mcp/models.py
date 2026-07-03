@@ -57,11 +57,6 @@ class Chunk(BaseModel):
             "meta": self.meta,
         }
 
-    @classmethod
-    def from_payload(cls, payload: dict[str, Any]) -> "Chunk":
-        return cls(**{k: v for k, v in payload.items() if k in cls.model_fields})
-
-
 class SearchSource(BaseModel):
     """검색 결과의 source 블록 (스펙 §5 스키마)."""
 
@@ -87,18 +82,6 @@ class SearchResult(BaseModel):
     score: float
     matched_by: list[str] = Field(default_factory=list)  # ["dense", "sparse"]
     source: SearchSource
-
-
-class DocMeta(BaseModel):
-    """list_documents 항목."""
-
-    document_id: str
-    doc_name: Optional[str] = None
-    fiscal_year: Optional[int] = None
-    source_path: Optional[str] = None
-    num_chunks: int = 0
-    embedding_model: str = "kure"
-    status: str = "unknown"
 
 
 ManifestStatus = Literal["parsing", "parsed", "embedded", "done", "error"]

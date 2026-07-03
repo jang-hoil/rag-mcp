@@ -55,4 +55,3 @@ def test_list_all(mstore):
 
 def test_unknown_returns_none(mstore):
     assert mstore.read("nope") is None
-    assert mstore.exists("nope") is False

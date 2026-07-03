@@ -6,7 +6,6 @@ reindex(reparse=False): 기존 chunks.jsonl 재사용 → 재임베딩·재upser
 """
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from pathlib import Path
 

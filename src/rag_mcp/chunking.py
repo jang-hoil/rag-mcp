@@ -14,7 +14,6 @@ from .models import Chunk
 from .pdf_parser import ParsedDoc
 from .table_chunking import (
     block_page,
-    cell_is_mashed,
     is_mashed_table,
     merge_cross_page_tables,
     table_grid_text,

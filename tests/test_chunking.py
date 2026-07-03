@@ -3,18 +3,15 @@ from __future__ import annotations
 
 import pytest
 
-from rag_mcp.chunking import (
-    BODY_MAX,
-    BODY_OVERLAP,
-    build_chunks,
+from rag_mcp.chunking import BODY_MAX, BODY_OVERLAP, build_chunks, split_long_text
+from rag_mcp.config import load_config
+from rag_mcp.pdf_parser import parse_pdf
+from rag_mcp.table_chunking import (
     cell_is_mashed,
     is_mashed_table,
     merge_cross_page_tables,
-    split_long_text,
     table_grid_text,
 )
-from rag_mcp.config import load_config
-from rag_mcp.pdf_parser import cell_text, parse_pdf
 
 DOC_ID = "예산편성_예산부서"
 PDF = "data/예산편성_예산부서.pdf"

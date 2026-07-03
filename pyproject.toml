@@ -9,7 +9,6 @@ dependencies = [
     "qdrant-client>=1.12.0",
     "sentence-transformers>=3.0.0",
     "kiwipiepy>=0.18.0",
-    "langchain-text-splitters>=0.3.0",
     "pydantic>=2.0.0",
     "opendataloader-pdf>=0.1.0",
     "pymupdf>=1.24.0",
