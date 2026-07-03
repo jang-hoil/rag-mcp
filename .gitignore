@@ -22,3 +22,6 @@ data/manifests/
 # 실데이터 (실제 문서 내용·문서명 포함 — 공개 금지, .example만 커밋)
 eval/goldset.jsonl
 tests/fixtures/sample_parsed.json
+
+# Claude Code 머신 로컬 설정 (개인별 — 커밋 금지)
+.claude/settings.local.json
