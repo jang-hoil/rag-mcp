@@ -46,7 +46,12 @@ class VectorStore:
         self._lock = threading.RLock()
         if client is not None:
             self.client = client
-        elif config.qdrant_mode == "server" and config.qdrant_url:
+        elif config.qdrant_mode == "server":
+            if not config.qdrant_url:
+                raise ValueError(
+                    "RAG_QDRANT_MODE=server인데 RAG_QDRANT_URL이 비어 있습니다 "
+                    "(조용히 local로 폴백하지 않음 — URL을 설정하거나 mode를 local로)."
+                )
             self.client = QdrantClient(url=config.qdrant_url)
         else:
             config.qdrant_path.mkdir(parents=True, exist_ok=True)

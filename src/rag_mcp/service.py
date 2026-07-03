@@ -107,6 +107,9 @@ class RagService:
             return []
         if search_mode not in ("hybrid", "dense", "sparse"):
             raise ValueError(f"search_mode는 hybrid|dense|sparse: {search_mode}")
+        # 오타(예: 'rff')가 조용히 RRF로 동작하지 않게 명시 검증
+        if fusion not in ("rrf", "dbsf"):
+            raise ValueError(f"fusion은 rrf|dbsf: {fusion}")
         # bool은 int 서브클래스라 True/False가 1/0으로 새는 것을 명시 차단
         if isinstance(top_k, bool) or not isinstance(top_k, int) or not (1 <= top_k <= _MAX_TOP_K):
             raise ValueError(f"top_k는 1~{_MAX_TOP_K} 정수: {top_k!r}")

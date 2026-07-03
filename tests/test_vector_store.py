@@ -94,6 +94,15 @@ def test_local_storage_lock_friendly_error(store):
         VectorStore(cfg, embedding_model="kure")
 
 
+def test_server_mode_without_url_raises(tmp_path, monkeypatch):
+    """server 모드인데 URL이 비면 조용히 local로 폴백하지 말고 설정 오류를 알린다."""
+    monkeypatch.setenv("RAG_QDRANT_MODE", "server")
+    monkeypatch.setenv("RAG_QDRANT_URL", "")
+    monkeypatch.setenv("RAG_QDRANT_PATH", str(tmp_path / "qdrant"))
+    with pytest.raises(ValueError, match="RAG_QDRANT_URL"):
+        VectorStore(Config(), embedding_model="kure")
+
+
 def test_point_id_stable():
     assert point_id_for("doc1::c0") == point_id_for("doc1::c0")
     assert point_id_for("doc1::c0") != point_id_for("doc1::c1")

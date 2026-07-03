@@ -114,9 +114,10 @@ class Indexer:
                 return {"ok": False, "error": f"원본 PDF 없음(reparse 불가): {m.source_path}"}
             from .pipeline import parse_and_chunk
 
+            # force=True: parsed JSON 캐시를 버리고 파서를 실제 재실행(캐시 재사용이면 reparse 무의미)
             chunks, meta = parse_and_chunk(
                 m.source_path, document_id, self.config,
-                fiscal_year=m.fiscal_year, doc_name=m.doc_name,
+                fiscal_year=m.fiscal_year, doc_name=m.doc_name, force=True,
             )
             # 사용자 metadata는 PDF에 없으므로 manifest에 보존된 값을 복원(없으면 None)
             self.index_chunks(

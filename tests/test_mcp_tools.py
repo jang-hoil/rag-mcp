@@ -64,6 +64,16 @@ def test_search_invalid_mode_raises(svc):
         svc.search_documents("x", search_mode="fuzzy")
 
 
+def test_search_invalid_fusion_raises(svc):
+    """fusion 오타(예: 'rff')가 조용히 RRF로 동작하지 않게 명시 검증."""
+    _seed(svc)
+    with pytest.raises(ValueError):
+        svc.search_documents("x", fusion="rff")
+    # 정상값은 통과
+    svc.search_documents("일반수용비", fusion="dbsf")
+    svc.search_documents("일반수용비", fusion="rrf")
+
+
 def test_search_top_k_out_of_range_raises(svc):
     _seed(svc)
     # 하한(0·음수)·상한(100 초과)·bool(True가 1로 통과하는 함정) 모두 거부
@@ -213,6 +223,29 @@ def test_reindex_reparse_reparses_and_preserves_meta(svc, monkeypatch, tmp_path)
     hits = svc.search_documents("새로 파싱된 본문")
     assert hits, "재파싱된 본문이 검색되지 않음"
     assert hits[0]["source"]["meta"]["부서"] == "예산과", "reparse 후 사용자 metadata 유실됨"
+
+
+def test_reindex_reparse_forces_fresh_parse(svc, monkeypatch, tmp_path):
+    """reparse=True는 parsed JSON 캐시를 버리고 실제 재파싱해야 한다(force=True).
+
+    force가 전달되지 않으면 parse_pdf가 기존 parsed/{id}/*.json을 재사용해
+    PDF가 바뀌어도 옛 내용으로 재색인되는 버그의 회귀 방지.
+    """
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_text("dummy")
+    svc.ingest_chunks("r2", [Chunk(chunk_id="r2::c0", document_id="r2", text="본문", fiscal_year=2026)],
+                      source_path=str(pdf))
+
+    seen_force: list[bool] = []
+
+    def fake_parse(path, doc_id, config, *, fiscal_year=None, doc_name=None, force=False):
+        seen_force.append(force)
+        return [Chunk(chunk_id="r2::c0", document_id="r2", text="본문", fiscal_year=fiscal_year)], {}
+
+    monkeypatch.setattr("rag_mcp.pipeline.parse_and_chunk", fake_parse)
+    res = svc.reindex_document("r2", reparse=True)
+    assert res["ok"] is True
+    assert seen_force == [True], "reparse=True인데 parse_and_chunk에 force=True가 전달되지 않음"
 
 
 def test_collection_status_tool(svc):

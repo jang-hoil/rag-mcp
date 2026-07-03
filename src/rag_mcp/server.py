@@ -132,8 +132,8 @@ def main() -> None:
     # 이유(중요): warmup이 startup을 막으면 서버가 MCP initialize에 즉시 응답 못 해
     # Claude Desktop이 "죽었다" 판단하고 기존 프로세스를 남긴 채 새 인스턴스를 추가 spawn
     # (= 중복의 근본 트리거)한다. mcp.run()을 먼저 태워 initialize에 바로 응답시킨다.
-    # 검색이 워밍업 완료 전에 오면 _retriever(RLock 보호)가 그 시점에 모델을 로드한다
-    # (기존 "첫 검색 콜드 스타트"와 동일 — 정합성 문제 없음).
+    # 검색이 워밍업 완료 전에 오면 backend의 로드 락이 단일 로드를 보장한다
+    # (한쪽이 로드, 다른 쪽은 완료 대기 — 기존 "첫 검색 콜드 스타트"와 동일한 체감).
     def _warmup() -> None:
         try:
             svc.warmup()
