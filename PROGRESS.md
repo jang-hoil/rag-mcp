@@ -160,6 +160,23 @@
   `20\d{2}` 연도 오인("2000원") / doctor TimeoutExpired 미포착 / table_grid_text span 미확장(docstring 과장) /
   본문 800자 고정 절단(문장 경계 무시) / sparse tf 비포화(BM25 k1/b 없음) / matched_by dense 항상 표기.
 
+### ✅ 완료 (2026-07-05) — 전체 검증 세션 + 추출 텍스트 정규화(PUA·NUL 제거)
+- **환경 주의**: WSL 머신, `~/.venvs/rag-mcp`(무거운 의존성 보유)로 검증. `PYTHONPATH=src`로 소스 실행.
+  Claude Desktop의 serve가 `data/qdrant` 락 점유 → **원본 색인을 scratch로 복사**해 CLI 검색 검증(비파괴).
+- **철저한 검증 결과(전부 통과)**: pytest 106→115 passed/8 skipped(신규 9), 실모델 임베딩 6 passed.
+  goldset recall@1=MRR=1.0. MCP stdio 도구 9개 정상. 엣지케이스(top_k경계·fusion·mode·model·필터allowlist·없는PDF) 방어.
+  기존 4문서 1665 points, fresh ingest 재현성(재산등록 38청크 동일, OCR p19/82/84 일치).
+- **표/한글 무결성 정밀 스캔(47.2만 자)**: `�`(U+FFFD) **0건** = 한글 손상 없음. JAMO 646은 정상(아래아ㆍ·원형불릿ㅇ).
+  표 셀 탭 구조 보존·needs_image 폴백·금액/코드 플래그 정상. 페이지 넘김 표 병합 회귀테스트 통과.
+- **수정 1건 (테스트 먼저 → 115 passed → 커밋)**: 추출 텍스트에 ① **PUA 심볼폰트 불릿**(U+F0FC✓·F0A7▪·
+  F06D□ 등 ~160자, 2025 온라인용 PDF 2종, text·heading_path에 노출→뷰어 □) ② **NUL 바이트**(U+0000 547개,
+  칠곡군 목차/제목) 혼입 발견. `pdf_parser.normalize_text()` 신설(PUA·C0/C1 제어 제거, TAB/LF·한글·금액·코드
+  보존, 이중공백 정리) → `cell_text`·`chunking.block_plain_text`에 배선. 실데이터 재빌드로 PUA/NUL **0** 실증
+  (칠곡군 857청크·재산등록 38청크). 검색 품질엔 무영향(불릿은 의미없는 마커).
+  **⚠️ 기존 색인 4문서는 옛 텍스트 보유 → 정리하려면 `reindex(reparse=True)` 필요**(색인 보유 머신에서).
+- **미수정·보고만(이전 항목 유지)**: 검색 관련도 임계값 없음(무관 쿼리도 top_k 반환, 표준 동작) /
+  qdrant_path가 RAG_DATA_DIR 미추종 / 본문 800자 고정 절단 / sparse tf 비포화 등.
+
 ## 구현된 모듈 지도 (참고)
 - `config.py` 모델별 컬렉션/차원 · `models.py` Chunk/SearchResult/Manifest
 - `tokenizer.py`(코드/금액 보존)+`sparse.py`(blake2b idx, tf, IDF modifier 전제)

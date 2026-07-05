@@ -11,7 +11,7 @@ from typing import Any
 
 from .metadata import has_amount, has_code
 from .models import Chunk
-from .pdf_parser import ParsedDoc
+from .pdf_parser import ParsedDoc, normalize_text
 from .table_chunking import (
     block_page,
     is_mashed_table,
@@ -48,10 +48,10 @@ def block_plain_text(block: dict[str, Any]) -> str:
             if isinstance(item, dict):
                 c = item.get("content")
                 if c:
-                    parts.append(str(c).strip())
+                    parts.append(normalize_text(str(c)).strip())
         return "\n".join(p for p in parts if p)
     content = block.get("content")
-    return str(content).strip() if content else ""
+    return normalize_text(str(content)).strip() if content else ""
 
 def split_long_text(text: str, max_len: int = BODY_MAX, overlap: int = BODY_OVERLAP) -> list[str]:
     text = text.strip()

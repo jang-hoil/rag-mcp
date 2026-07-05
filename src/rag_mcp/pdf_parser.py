@@ -16,11 +16,38 @@ from __future__ import annotations
 
 import glob
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
 from .config import Config
+
+_MULTI_SPACE_RE = re.compile(r" {2,}")
+
+
+def normalize_text(s: str) -> str:
+    """추출 원문에서 PUA(심볼폰트 불릿)·제어문자(NUL 등)를 제거한다.
+
+    - PUA(U+E000–F8FF, 보충 PUA)는 유니코드 의미가 없는 Wingdings/Symbol 글리프(불릿·체크박스)로
+      뷰어에서 두부(□)로 표시되므로 제거한다.
+    - NUL 등 C0/C1 제어문자는 표/본문 구분자(TAB, LF)만 남기고 제거한다.
+    한글·금액·과목코드 등 일반 문자와 표 구분자는 보존하고, 제거로 생긴 이중 공백만 하나로 정리한다.
+    """
+    if not s:
+        return s
+    out: list[str] = []
+    for ch in s:
+        if ch == "\t" or ch == "\n":
+            out.append(ch)
+            continue
+        o = ord(ch)
+        if o < 0x20 or o == 0x7F or 0x80 <= o <= 0x9F:
+            continue  # C0/C1 제어(탭·개행 제외)
+        if 0xE000 <= o <= 0xF8FF or 0xF0000 <= o <= 0xFFFFD or 0x100000 <= o <= 0x10FFFD:
+            continue  # PUA
+        out.append(ch)
+    return _MULTI_SPACE_RE.sub(" ", "".join(out))
 
 
 @dataclass
@@ -65,7 +92,7 @@ def cell_text(cell: dict[str, Any]) -> str:
                 collect(x)
 
     collect(cell)
-    return " ".join(p.strip() for p in parts if p and p.strip())
+    return normalize_text(" ".join(p.strip() for p in parts if p and p.strip())).strip()
 
 
 def _find_output(out_dir: Path, ext: str) -> Optional[Path]:
