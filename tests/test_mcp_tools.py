@@ -6,6 +6,7 @@ import pytest
 from rag_mcp.config import Config
 from rag_mcp.models import Chunk
 from rag_mcp.service import RagService
+from rag_mcp.vector_store import point_id_for
 
 
 @pytest.fixture
@@ -208,6 +209,47 @@ def test_upsert_failure_preserves_existing_points(svc, monkeypatch):
 
     assert svc.get_chunk("d1::c0")["ok"] is True
     assert svc.get_chunk("d1::c1")["ok"] is True
+
+
+def test_partial_upsert_failure_restores_pre_replacement_state(svc, monkeypatch):
+    _seed(svc)
+    store = svc._indexer("kure").store
+    old_ids = [point_id_for("d1::c0"), point_id_for("d1::c1")]
+
+    def old_record_state():
+        records = store.client.retrieve(
+            store.collection,
+            ids=old_ids,
+            with_payload=True,
+            with_vectors=True,
+        )
+        return {record.id: record for record in records}
+
+    before = old_record_state()
+    original_upsert = store.upsert_chunks
+
+    def partially_upsert_then_fail(chunks, vecs):
+        original_upsert(chunks[:2], vecs[:2])
+        raise RuntimeError("partial upsert")
+
+    monkeypatch.setattr(store, "upsert_chunks", partially_upsert_then_fail)
+    replacement = [
+        Chunk(chunk_id="d1::c0", document_id="d1", text="overwritten", page=99),
+        Chunk(chunk_id="d1::c2", document_id="d1", text="inserted only"),
+        Chunk(chunk_id="d1::c3", document_id="d1", text="never written"),
+    ]
+
+    with pytest.raises(RuntimeError, match="partial upsert"):
+        svc.ingest_chunks("d1", replacement)
+
+    after = old_record_state()
+    assert after.keys() == before.keys()
+    for point_id, old_record in before.items():
+        restored = after[point_id]
+        assert restored.payload == old_record.payload
+        assert restored.vector["sparse"] == old_record.vector["sparse"]
+        assert restored.vector["dense"] == pytest.approx(old_record.vector["dense"])
+    assert svc.get_chunk("d1::c2")["ok"] is False
 
 
 def test_successful_replacement_deletes_only_stale_points(svc):

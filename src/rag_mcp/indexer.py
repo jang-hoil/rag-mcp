@@ -15,7 +15,7 @@ from .embeddings import EmbeddingBackend, get_backend
 from .manifest import ManifestStore
 from .models import Chunk, Manifest
 from .request_models import DocumentMetadata, JsonValue
-from .vector_store import VectorStore, point_id_for
+from .vector_store import VectorStore
 
 
 class Indexer:
@@ -99,14 +99,11 @@ class Indexer:
         self.save_chunks(document_id, chunks)
 
         # 실패 안전: 임베딩을 먼저 수행(여기서 실패해도 기존 색인은 보존).
-        # upsert 성공 후에만 새 색인에 없는 기존 포인트를 삭제한다.
+        # 임베딩 성공 뒤 Qdrant 교체 전체를 store 잠금 안에서 수행한다.
         try:
-            old_point_ids = self.store.point_ids_by_document(document_id)
             vecs = self.backend.embed_documents([c.text for c in chunks])
             self.manifests.update(document_id, status="embedded", num_chunks=len(chunks))
-            self.store.upsert_chunks(chunks, vecs)
-            new_point_ids = {point_id_for(chunk.chunk_id) for chunk in chunks}
-            self.store.delete_point_ids(old_point_ids - new_point_ids)
+            self.store.replace_document(document_id, chunks, vecs)
         except Exception:
             # 색인 실패를 manifest에 남겨 추적 가능하게(기존 데이터는 위에서 보존됨)
             self.manifests.update(document_id, status="error")

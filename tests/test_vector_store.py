@@ -146,3 +146,105 @@ def test_concurrent_query_during_upsert_is_safe(store, fake_backend):
     tw.join(10); stop.set(); tr.join(10)
     assert not errors, errors
     assert store.count_by_document("docw") == 20
+
+
+def test_replace_document_reports_rollback_failure(store, fake_backend, monkeypatch):
+    _seed(store, fake_backend)
+    replacement = [
+        _chunk("doc1::c0", "replacement", 2026),
+        _chunk("doc1::c2", "inserted only", 2026),
+    ]
+    vectors = fake_backend.embed_documents([chunk.text for chunk in replacement])
+    original_upsert = store.client.upsert
+    calls = 0
+
+    def fail_primary_then_restore(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            original_upsert(*args, **kwargs)
+            raise RuntimeError("primary upsert failure")
+        raise RuntimeError("restore failure")
+
+    monkeypatch.setattr(store.client, "upsert", fail_primary_then_restore)
+
+    with pytest.raises(RuntimeError, match="rollback failed") as excinfo:
+        store.replace_document("doc1", replacement, vectors)
+
+    message = str(excinfo.value)
+    assert "primary upsert failure" in message
+    assert "restore failure" in message
+    assert store.retrieve_chunk("doc1::c2") is None
+
+
+def test_document_replacements_are_serialized(store, fake_backend, monkeypatch):
+    import threading
+
+    _seed(store, fake_backend)
+    first = [_chunk("doc1::c0", "first replacement", 2026)]
+    second = [_chunk("doc1::c0", "second replacement", 2026)]
+    first_vectors = fake_backend.embed_documents([chunk.text for chunk in first])
+    second_vectors = fake_backend.embed_documents([chunk.text for chunk in second])
+    replace_document = store.replace_document
+    original_upsert = store.upsert_chunks
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    second_entered = threading.Event()
+    second_lock_attempted = threading.Event()
+    call_lock = threading.Lock()
+    errors = []
+    calls = 0
+    second_thread = None
+
+    class ObservedRLock:
+        def __init__(self, lock):
+            self._lock = lock
+
+        def __enter__(self):
+            if threading.current_thread() is second_thread:
+                second_lock_attempted.set()
+            self._lock.acquire()
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            self._lock.release()
+
+    def blocking_upsert(chunks, vectors):
+        nonlocal calls
+        with call_lock:
+            calls += 1
+            call_number = calls
+        if call_number == 1:
+            first_entered.set()
+            if not release_first.wait(5):
+                raise TimeoutError("first replacement was not released")
+        else:
+            second_entered.set()
+        return original_upsert(chunks, vectors)
+
+    def run_replacement(chunks, vectors):
+        try:
+            replace_document("doc1", chunks, vectors)
+        except Exception as exc:  # pragma: no cover - assertion reports details
+            errors.append(exc)
+
+    monkeypatch.setattr(store, "upsert_chunks", blocking_upsert)
+    monkeypatch.setattr(store, "_lock", ObservedRLock(store._lock))
+    first_thread = threading.Thread(target=run_replacement, args=(first, first_vectors))
+    second_thread = threading.Thread(target=run_replacement, args=(second, second_vectors))
+
+    first_thread.start()
+    assert first_entered.wait(5)
+    second_thread.start()
+    assert second_lock_attempted.wait(5)
+    assert not second_entered.is_set(), "second replacement entered before the first completed"
+
+    release_first.set()
+    first_thread.join(5)
+    second_thread.join(5)
+
+    assert not first_thread.is_alive()
+    assert not second_thread.is_alive()
+    assert not errors, errors
+    assert second_entered.is_set()
+    assert store.retrieve_chunk("doc1::c0").payload["text"] == "second replacement"

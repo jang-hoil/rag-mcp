@@ -133,29 +133,45 @@ class VectorStore:
 
     def point_ids_by_document(self, document_id: str) -> set[str | int]:
         with self._lock:
-            if not self.client.collection_exists(self.collection):
-                return set()
-            found: set[str | int] = set()
-            offset = None
-            while True:
-                points, offset = self.client.scroll(
-                    collection_name=self.collection,
-                    scroll_filter=models.Filter(
-                        must=[
-                            models.FieldCondition(
-                                key="document_id",
-                                match=models.MatchValue(value=document_id),
-                            )
-                        ]
-                    ),
-                    limit=256,
-                    offset=offset,
+            return {
+                point.id
+                for point in self._document_points_locked(
+                    document_id,
                     with_payload=False,
                     with_vectors=False,
                 )
-                found.update(point.id for point in points)
-                if offset is None:
-                    return found
+            }
+
+    def _document_points_locked(
+        self,
+        document_id: str,
+        *,
+        with_payload: bool,
+        with_vectors: bool,
+    ) -> list[models.Record]:
+        if not self.client.collection_exists(self.collection):
+            return []
+        found = []
+        offset = None
+        while True:
+            points, offset = self.client.scroll(
+                collection_name=self.collection,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="document_id",
+                            match=models.MatchValue(value=document_id),
+                        )
+                    ]
+                ),
+                limit=256,
+                offset=offset,
+                with_payload=with_payload,
+                with_vectors=with_vectors,
+            )
+            found.extend(points)
+            if offset is None:
+                return found
 
     def delete_point_ids(self, point_ids: set[str | int]) -> None:
         if not point_ids:
@@ -167,6 +183,55 @@ class VectorStore:
                 collection_name=self.collection,
                 points_selector=models.PointIdsList(points=list(point_ids)),
             )
+
+    def replace_document(
+        self,
+        document_id: str,
+        chunks: list[Chunk],
+        dense_vectors: list[list[float]],
+    ) -> int:
+        """문서 포인트 교체를 직렬화하고 실패 시 교체 전 상태로 복구한다."""
+        new_point_ids = {point_id_for(chunk.chunk_id) for chunk in chunks}
+        with self._lock:
+            old_points = self._document_points_locked(
+                document_id,
+                with_payload=True,
+                with_vectors=True,
+            )
+            old_point_ids = {point.id for point in old_points}
+            try:
+                count = self.upsert_chunks(chunks, dense_vectors)
+                self.delete_point_ids(old_point_ids - new_point_ids)
+                return count
+            except Exception as primary_error:
+                rollback_errors = []
+                if old_points:
+                    try:
+                        self.client.upsert(
+                            collection_name=self.collection,
+                            points=[
+                                models.PointStruct(
+                                    id=point.id,
+                                    vector=point.vector,
+                                    payload=point.payload,
+                                )
+                                for point in old_points
+                            ],
+                        )
+                    except Exception as restore_error:
+                        rollback_errors.append(("restore old points", restore_error))
+                try:
+                    self.delete_point_ids(new_point_ids - old_point_ids)
+                except Exception as cleanup_error:
+                    rollback_errors.append(("remove inserted points", cleanup_error))
+                if rollback_errors:
+                    details = "; ".join(
+                        f"{stage}: {error!r}" for stage, error in rollback_errors
+                    )
+                    raise RuntimeError(
+                        f"Qdrant replacement failed ({primary_error!r}); rollback failed: {details}"
+                    ) from rollback_errors[0][1]
+                raise
 
     # --- 검색 ---
     def _filter(self, fiscal_year: int | None, filters: Mapping[str, FilterValue] | None) -> models.Filter | None:
