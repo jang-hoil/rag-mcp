@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from .config import Config, load_config
-from .embeddings import EmbeddingBackend
+from .embeddings import EmbeddingBackend, get_backend
 from .indexer import Indexer
 from .jobs import JobStore
 from .manifest import ManifestStore
@@ -46,7 +46,8 @@ class RagService:
         backend: Optional[EmbeddingBackend] = None,
     ):
         self.config = config or load_config()
-        self._backend = backend  # 테스트 주입(Fake) 또는 None(실모델 lazy)
+        self._backend = backend
+        self._backends: dict[str, EmbeddingBackend] = {}
         self._retrievers: dict[str, Retriever] = {}
         self._indexers: dict[str, Indexer] = {}
         self.manifests = ManifestStore(self.config)
@@ -60,11 +61,19 @@ class RagService:
         # _indexer가 락을 쥔 채 _retriever를 재호출하므로 재진입 가능한 RLock을 쓴다.
         self._resource_lock = threading.RLock()
 
+    def _embedding_backend(self, model: str) -> EmbeddingBackend:
+        if self._backend is not None:
+            return self._backend
+        with self._resource_lock:
+            if model not in self._backends:
+                self._backends[model] = get_backend(model)
+            return self._backends[model]
+
     def _retriever(self, model: str) -> Retriever:
         with self._resource_lock:
             if model not in self._retrievers:
                 store = VectorStore(self.config, model)
-                self._retrievers[model] = Retriever(self.config, model, backend=self._backend, store=store)
+                self._retrievers[model] = Retriever(self.config, model, backend=self._embedding_backend(model), store=store)
             return self._retrievers[model]
 
     def preflight(self, model: str | None = None) -> None:
@@ -97,7 +106,7 @@ class RagService:
         with self._resource_lock:
             if model not in self._indexers:
                 store = self._retriever(model).store  # 같은 컬렉션/클라이언트 공유
-                self._indexers[model] = Indexer(self.config, model, backend=self._backend, store=store)
+                self._indexers[model] = Indexer(self.config, model, backend=self._embedding_backend(model), store=store)
             return self._indexers[model]
 
     def _reserve_mutation(
@@ -137,7 +146,7 @@ class RagService:
     # --- 도구 ---
     def search_documents(
         self, query: str, top_k: int = 8, search_mode: str = "hybrid",
-        embedding_model: str = "kure", fusion: str = "rrf",
+        embedding_model: str | None = None, fusion: str = "rrf",
         fiscal_year: int | None = None, filters: Mapping[str, JsonValue] | SearchFilters | None = None,
     ) -> list[dict]:
         if not query or not query.strip():
@@ -152,14 +161,16 @@ class RagService:
             raise ValueError(f"top_k는 1~{_MAX_TOP_K} 정수: {top_k!r}")
         parsed_filters = SearchFilters.from_raw(filters)
         parsed_filters.ensure_allowed(_ALLOWED_FILTER_KEYS)
-        results = self._retriever(embedding_model).search(
+        model = embedding_model or self.config.embedding_model
+        results = self._retriever(model).search(
             query, top_k=top_k, search_mode=search_mode, fusion=fusion,
             fiscal_year=fiscal_year, filters=parsed_filters.to_qdrant(),
         )
         return [r.model_dump() for r in results]
 
-    def get_chunk(self, chunk_id: str, embedding_model: str = "kure") -> dict:
-        r = self._retriever(embedding_model).get_chunk(chunk_id)
+    def get_chunk(self, chunk_id: str, embedding_model: str | None = None) -> dict:
+        model = embedding_model or self.config.embedding_model
+        r = self._retriever(model).get_chunk(chunk_id)
         if r is None:
             return {"ok": False, "error": f"청크 없음: {chunk_id}"}
         return {"ok": True, **r.model_dump()}
@@ -248,7 +259,7 @@ class RagService:
     def ingest_chunks(
         self, document_id: str, chunks: list[Chunk], doc_name: str | None = None,
         fiscal_year: int | None = None, source_path: str | None = None,
-        metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None, embedding_model: str = "kure",
+        metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None, embedding_model: str | None = None,
     ) -> dict:
         """이미 추출된 청크를 색인 (파서 파이프라인의 종단·테스트용 진입점)."""
         token, busy = self._reserve_mutation("ingest_chunks")
@@ -258,7 +269,7 @@ class RagService:
         try:
             return self._ingest_chunks_unlocked(
                 document_id, chunks, doc_name=doc_name, fiscal_year=fiscal_year,
-                source_path=source_path, metadata=metadata, embedding_model=embedding_model,
+                source_path=source_path, metadata=metadata, embedding_model=embedding_model or self.config.embedding_model,
             )
         finally:
             self._release_mutation(token)
@@ -266,7 +277,7 @@ class RagService:
     def _ingest_chunks_unlocked(
         self, document_id: str, chunks: list[Chunk], doc_name: str | None = None,
         fiscal_year: int | None = None, source_path: str | None = None,
-        metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None, embedding_model: str = "kure",
+        metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None, embedding_model: str | None = None,
     ) -> dict:
         m = self._indexer(embedding_model).index_chunks(
             document_id, chunks, doc_name=doc_name, fiscal_year=fiscal_year,
@@ -276,7 +287,7 @@ class RagService:
 
     def ingest_pdf(
         self, path: str, document_id: str | None = None, fiscal_year: int | None = None,
-        doc_name: str | None = None, metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None, embedding_model: str = "kure",
+        doc_name: str | None = None, metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None, embedding_model: str | None = None,
     ) -> dict:
         """PDF 색인. 파서·청킹 파이프라인(마일스톤2~3) 연결 지점.
 
@@ -289,14 +300,14 @@ class RagService:
         try:
             return self._ingest_pdf_unlocked(
                 path, document_id=document_id, fiscal_year=fiscal_year,
-                doc_name=doc_name, metadata=metadata, embedding_model=embedding_model,
+                doc_name=doc_name, metadata=metadata, embedding_model=embedding_model or self.config.embedding_model,
             )
         finally:
             self._release_mutation(token)
 
     def _ingest_pdf_unlocked(
         self, path: str, document_id: str | None = None, fiscal_year: int | None = None,
-        doc_name: str | None = None, metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None, embedding_model: str = "kure",
+        doc_name: str | None = None, metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None, embedding_model: str | None = None,
     ) -> dict:
         if not Path(path).exists():
             return {"ok": False, "error": f"PDF 없음: {path}"}
@@ -319,12 +330,12 @@ class RagService:
         return self._ingest_chunks_unlocked(
             doc_id, chunks, doc_name=meta.get("doc_name", doc_name),
             fiscal_year=meta.get("fiscal_year", fiscal_year), source_path=path,
-            metadata=DocumentMetadata(values=metadata_values), embedding_model=embedding_model,
+            metadata=DocumentMetadata(values=metadata_values), embedding_model=embedding_model or self.config.embedding_model,
         )
 
     def submit_ingest(
         self, path: str, document_id: str | None = None, fiscal_year: int | None = None,
-        doc_name: str | None = None, metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None, embedding_model: str = "kure",
+        doc_name: str | None = None, metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None, embedding_model: str | None = None,
     ) -> dict:
         """PDF 색인을 백그라운드 스레드로 던지고 즉시 job_id를 반환(비블로킹).
 
@@ -351,7 +362,7 @@ class RagService:
             try:
                 res = self._ingest_pdf_unlocked(
                     path, document_id=document_id, fiscal_year=fiscal_year,
-                    doc_name=doc_name, metadata=metadata, embedding_model=embedding_model,
+                    doc_name=doc_name, metadata=metadata, embedding_model=embedding_model or self.config.embedding_model,
                 )
                 if res.get("ok"):
                     self.jobs.finish(job.job_id, res)

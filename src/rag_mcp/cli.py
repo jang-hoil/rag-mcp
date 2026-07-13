@@ -29,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     p_ing.add_argument("--document-id")
     p_ing.add_argument("--fiscal-year", type=int)
     p_ing.add_argument("--doc-name")
-    p_ing.add_argument("--embedding-model", default="kure")
+    p_ing.add_argument("--embedding-model", default=None)
 
     p_search = sub.add_parser("search", help="검색")
     p_search.add_argument("query")
@@ -37,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     p_search.add_argument("--mode", default="hybrid", choices=["hybrid", "dense", "sparse"])
     p_search.add_argument("--fusion", default="rrf", choices=["rrf", "dbsf"])
     p_search.add_argument("--fiscal-year", type=int)
-    p_search.add_argument("--embedding-model", default="kure")
+    p_search.add_argument("--embedding-model", default=None)
 
     sub.add_parser("status", help="컬렉션 상태")
     sub.add_parser("doctor", help="로컬 OCR/Tesseract 실행 환경 진단")
@@ -46,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     p_eval = sub.add_parser("eval", help="검색 품질 평가(읽기 전용 골든셋 채점)")
     p_eval.add_argument("goldset", help="JSONL 골든셋 경로 (예: eval/goldset.jsonl)")
     p_eval.add_argument("--fetch-k", type=int, default=50)
-    p_eval.add_argument("--embedding-model", default="kure")
+    p_eval.add_argument("--embedding-model", default=None)
     p_eval.add_argument("--json", action="store_true", help="요약을 JSON으로 출력")
 
     args = parser.parse_args(argv)

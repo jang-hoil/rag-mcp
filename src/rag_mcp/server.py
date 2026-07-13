@@ -36,7 +36,7 @@ async def _run(fn, *args, **kwargs):
 
 @mcp.tool()
 async def search_documents(
-    query: str, top_k: int = 8, search_mode: str = "hybrid", embedding_model: str = "kure",
+    query: str, top_k: int = 8, search_mode: str = "hybrid", embedding_model: str | None = None,
     fusion: str = "rrf", fiscal_year: int | None = None, filters: dict[str, JsonValue] | None = None,
 ) -> list[dict]:
     """회계·예산 지침서 하이브리드 검색. embedding_model이 컬렉션 결정.
@@ -50,7 +50,7 @@ async def search_documents(
 @mcp.tool()
 async def ingest_pdf(
     path: str, document_id: str | None = None, fiscal_year: int | None = None,
-    doc_name: str | None = None, metadata: dict[str, JsonValue] | None = None, embedding_model: str = "kure",
+    doc_name: str | None = None, metadata: dict[str, JsonValue] | None = None, embedding_model: str | None = None,
 ) -> dict:
     """PDF 색인을 백그라운드로 시작하고 즉시 job_id를 반환(비블로킹).
 
@@ -71,7 +71,7 @@ async def ingest_status(job_id: str) -> dict:
 
 
 @mcp.tool()
-async def get_chunk(chunk_id: str, embedding_model: str = "kure") -> dict:
+async def get_chunk(chunk_id: str, embedding_model: str | None = None) -> dict:
     """chunk_id로 단건 조회."""
     return await _run(service().get_chunk, chunk_id, embedding_model=embedding_model)
 
