@@ -191,6 +191,37 @@ def test_index_embed_failure_preserves_existing(svc, monkeypatch):
     assert svc.search_documents("원본 데이터 보존 확인"), "임베딩 실패로 기존 데이터 유실됨!"
 
 
+def test_upsert_failure_preserves_existing_points(svc, monkeypatch):
+    _seed(svc)
+    store = svc._indexer("kure").store
+    monkeypatch.setattr(
+        store,
+        "upsert_chunks",
+        lambda chunks, vecs: (_ for _ in ()).throw(RuntimeError("upsert")),
+    )
+
+    with pytest.raises(RuntimeError, match="upsert"):
+        svc.ingest_chunks(
+            "d1",
+            [Chunk(chunk_id="d1::c0", document_id="d1", text="replacement")],
+        )
+
+    assert svc.get_chunk("d1::c0")["ok"] is True
+    assert svc.get_chunk("d1::c1")["ok"] is True
+
+
+def test_successful_replacement_deletes_only_stale_points(svc):
+    _seed(svc)
+
+    svc.ingest_chunks(
+        "d1",
+        [Chunk(chunk_id="d1::c0", document_id="d1", text="replacement")],
+    )
+
+    assert svc.get_chunk("d1::c0")["text"] == "replacement"
+    assert svc.get_chunk("d1::c1")["ok"] is False
+
+
 def test_empty_reindex_preserves_existing_document(svc):
     _seed(svc)
     old_manifest = svc.manifests.read("d1")

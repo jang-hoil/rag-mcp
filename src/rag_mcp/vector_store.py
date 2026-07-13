@@ -131,6 +131,43 @@ class VectorStore:
                 ),
             )
 
+    def point_ids_by_document(self, document_id: str) -> set[str | int]:
+        with self._lock:
+            if not self.client.collection_exists(self.collection):
+                return set()
+            found: set[str | int] = set()
+            offset = None
+            while True:
+                points, offset = self.client.scroll(
+                    collection_name=self.collection,
+                    scroll_filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="document_id",
+                                match=models.MatchValue(value=document_id),
+                            )
+                        ]
+                    ),
+                    limit=256,
+                    offset=offset,
+                    with_payload=False,
+                    with_vectors=False,
+                )
+                found.update(point.id for point in points)
+                if offset is None:
+                    return found
+
+    def delete_point_ids(self, point_ids: set[str | int]) -> None:
+        if not point_ids:
+            return
+        with self._lock:
+            if not self.client.collection_exists(self.collection):
+                return
+            self.client.delete(
+                collection_name=self.collection,
+                points_selector=models.PointIdsList(points=list(point_ids)),
+            )
+
     # --- 검색 ---
     def _filter(self, fiscal_year: int | None, filters: Mapping[str, FilterValue] | None) -> models.Filter | None:
         must = []
