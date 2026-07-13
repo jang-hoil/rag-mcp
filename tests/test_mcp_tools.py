@@ -191,6 +191,50 @@ def test_index_embed_failure_preserves_existing(svc, monkeypatch):
     assert svc.search_documents("원본 데이터 보존 확인"), "임베딩 실패로 기존 데이터 유실됨!"
 
 
+def test_empty_reindex_preserves_existing_document(svc):
+    _seed(svc)
+    old_manifest = svc.manifests.read("d1")
+    old_chunks = (svc.config.parsed_doc_dir("d1") / "chunks.jsonl").read_bytes()
+
+    with pytest.raises(ValueError, match="청크"):
+        svc.ingest_chunks("d1", [])
+
+    assert svc.get_chunk("d1::c0")["ok"] is True
+    assert svc.manifests.read("d1") == old_manifest
+    assert (svc.config.parsed_doc_dir("d1") / "chunks.jsonl").read_bytes() == old_chunks
+
+
+def test_blank_chunk_reindex_preserves_existing_document(svc):
+    _seed(svc)
+    old_manifest = svc.manifests.read("d1")
+    old_chunks = (svc.config.parsed_doc_dir("d1") / "chunks.jsonl").read_bytes()
+    blank = Chunk(chunk_id="d1::blank", document_id="d1", text=" \t\n")
+
+    with pytest.raises(ValueError, match="청크"):
+        svc.ingest_chunks("d1", [blank])
+
+    assert svc.get_chunk("d1::c0")["ok"] is True
+    assert svc.manifests.read("d1") == old_manifest
+    assert (svc.config.parsed_doc_dir("d1") / "chunks.jsonl").read_bytes() == old_chunks
+
+
+def test_chunk_write_failure_preserves_existing_jsonl(svc, monkeypatch):
+    _seed(svc)
+    path = svc.config.parsed_doc_dir("d1") / "chunks.jsonl"
+    old_chunks = path.read_bytes()
+    replacement = [Chunk(chunk_id="d1::new", document_id="d1", text="새 본문")]
+
+    def fail_serialization(self):
+        raise RuntimeError("직렬화 실패 주입")
+
+    monkeypatch.setattr(Chunk, "model_dump_json", fail_serialization)
+
+    with pytest.raises(RuntimeError, match="직렬화 실패"):
+        svc.ingest_chunks("d1", replacement)
+
+    assert path.read_bytes() == old_chunks
+
+
 def test_reindex_tool(svc):
     _seed(svc)
     res = svc.reindex_document("d1", reparse=False)
@@ -254,6 +298,20 @@ def test_collection_status_tool(svc):
     assert st["documents"] == 1
     assert st["by_fiscal_year"].get("2026") == 1
     assert "kure" in st["collections"]
+
+
+def test_ingest_pdf_forces_fresh_parse(svc, monkeypatch, tmp_path):
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"%PDF")
+    seen = []
+
+    def fake_parse(path, doc_id, config, *, fiscal_year=None, doc_name=None, force=False):
+        seen.append(force)
+        return [Chunk(chunk_id=f"{doc_id}::c0", document_id=doc_id, text="new")], {}
+
+    monkeypatch.setattr("rag_mcp.pipeline.parse_and_chunk", fake_parse)
+    assert svc.ingest_pdf(str(pdf), document_id="doc")["ok"] is True
+    assert seen == [True]
 
 def test_ingest_pdf_records_ocr_info_in_manifest_meta(svc, monkeypatch, tmp_path):
     pdf = tmp_path / "ocr.pdf"

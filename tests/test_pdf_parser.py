@@ -5,9 +5,11 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from rag_mcp.config import load_config
+from rag_mcp.config import Config, load_config
 from rag_mcp.pdf_parser import cell_text, parse_pdf
 
 DOC_ID = "예산편성_예산부서"
@@ -51,3 +53,35 @@ def test_cell_text_golden(parsed):
                     texts.add(cell_text(c))
     assert "개정번호" in texts
     assert "작성자" in texts
+
+
+def test_force_parse_selects_json_changed_by_current_conversion(monkeypatch, tmp_path):
+    cfg = Config(data_dir=tmp_path / "data", ocr_mode="off")
+    pdf = tmp_path / "new.pdf"
+    pdf.write_bytes(b"%PDF")
+    out = cfg.parsed_doc_dir("same")
+    out.mkdir(parents=True)
+    (out / "a-old.json").write_text('{"title":"old","kids":[]}', encoding="utf-8")
+
+    def fake_convert(**kwargs):
+        target = Path(kwargs["output_dir"]) / "z-new.json"
+        target.write_text('{"title":"new","kids":[]}', encoding="utf-8")
+
+    monkeypatch.setattr("opendataloader_pdf.convert", fake_convert)
+    parsed = parse_pdf(pdf, "same", cfg, force=True)
+    assert parsed.title == "new"
+    assert parsed.json_path.name == "z-new.json"
+
+
+def test_force_parse_requires_json_from_current_conversion(monkeypatch, tmp_path):
+    cfg = Config(data_dir=tmp_path / "data", ocr_mode="off")
+    pdf = tmp_path / "new.pdf"
+    pdf.write_bytes(b"%PDF")
+    out = cfg.parsed_doc_dir("same")
+    out.mkdir(parents=True)
+    (out / "old.json").write_text('{"title":"old","kids":[]}', encoding="utf-8")
+
+    monkeypatch.setattr("opendataloader_pdf.convert", lambda **kwargs: None)
+
+    with pytest.raises(RuntimeError, match="현재 변환"):
+        parse_pdf(pdf, "same", cfg, force=True)

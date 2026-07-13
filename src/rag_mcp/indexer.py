@@ -6,6 +6,7 @@ reindex(reparse=False): 기존 chunks.jsonl 재사용 → 재임베딩·재upser
 """
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -44,9 +45,15 @@ class Indexer:
         d = self.config.parsed_doc_dir(document_id)
         d.mkdir(parents=True, exist_ok=True)
         p = self._chunks_path(document_id)
-        with p.open("w", encoding="utf-8") as f:
-            for c in chunks:
-                f.write(c.model_dump_json() + "\n")
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        try:
+            with tmp.open("w", encoding="utf-8") as stream:
+                for chunk in chunks:
+                    stream.write(chunk.model_dump_json() + "\n")
+            os.replace(tmp, p)
+        finally:
+            if tmp.exists():
+                tmp.unlink()
         return p
 
     def load_chunks(self, document_id: str) -> list[Chunk]:
@@ -73,6 +80,9 @@ class Indexer:
 
         metadata: 문서 단위 추가 메타. 각 청크 meta에 병합되어 payload·검색결과·필터에 반영.
         """
+        if not chunks or any(not chunk.text.strip() for chunk in chunks):
+            raise ValueError("색인할 유효 청크가 없습니다")
+
         parsed_metadata = DocumentMetadata.from_raw(metadata)
         metadata_payload = parsed_metadata.to_payload()
         if metadata_payload:

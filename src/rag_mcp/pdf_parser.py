@@ -100,6 +100,24 @@ def _find_output(out_dir: Path, ext: str) -> Optional[Path]:
     return Path(hits[0]) if hits else None
 
 
+def _output_signatures(out_dir: Path, ext: str) -> dict[Path, tuple[int, int]]:
+    return {
+        path.resolve(): (path.stat().st_mtime_ns, path.stat().st_size)
+        for path in out_dir.glob(f"*.{ext}")
+    }
+
+
+def _find_changed_output(
+    out_dir: Path, ext: str, before: dict[Path, tuple[int, int]]
+) -> Optional[Path]:
+    changed = []
+    for path in out_dir.glob(f"*.{ext}"):
+        signature = (path.stat().st_mtime_ns, path.stat().st_size)
+        if before.get(path.resolve()) != signature:
+            changed.append(path)
+    return max(changed, key=lambda path: path.stat().st_mtime_ns) if changed else None
+
+
 def parse_pdf(
     pdf_path: str | Path,
     document_id: str,
@@ -124,6 +142,8 @@ def parse_pdf(
 
         from .ocr_triage import document_needs_ocr
 
+        before_json = _output_signatures(out_dir, "json")
+
         convert_kw: dict = dict(
             input_path=str(pdf_path),
             output_dir=str(out_dir),
@@ -145,7 +165,12 @@ def parse_pdf(
                     convert_kw["hybrid_url"] = config.odl_hybrid_url
 
         opendataloader_pdf.convert(**convert_kw)
-        json_path = _find_output(out_dir, "json")
+        if force:
+            json_path = _find_changed_output(out_dir, "json", before_json)
+            if json_path is None:
+                raise RuntimeError(f"현재 변환의 JSON 산출물을 찾지 못함: {out_dir}")
+        else:
+            json_path = _find_output(out_dir, "json")
 
     if json_path is None:
         raise RuntimeError(f"JSON 산출물을 찾지 못함: {out_dir}")

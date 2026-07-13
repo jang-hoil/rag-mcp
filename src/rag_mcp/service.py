@@ -219,7 +219,9 @@ class RagService:
                          "이미 추출된 청크는 ingest_chunks 사용.",
             }
         doc_id = document_id or Path(path).stem
-        chunks, meta = parse_and_chunk(path, doc_id, self.config, fiscal_year=fiscal_year, doc_name=doc_name)
+        chunks, meta = parse_and_chunk(
+            path, doc_id, self.config, fiscal_year=fiscal_year, doc_name=doc_name, force=True,
+        )
         parsed_metadata = DocumentMetadata.from_raw(metadata)
         metadata_values = dict(parsed_metadata.values)
         if meta.get("ocr"):
