@@ -177,6 +177,69 @@ def test_replace_document_reports_rollback_failure(store, fake_backend, monkeypa
     assert store.retrieve_chunk("doc1::c2") is None
 
 
+def test_replace_document_rejects_collection_global_point_id_collision(
+    store,
+    fake_backend,
+    monkeypatch,
+):
+    colliding_chunk_id = "shared::c0"
+    unrelated = _chunk(
+        colliding_chunk_id,
+        "unrelated original",
+        2026,
+        doc="unrelated",
+    )
+    store.upsert_chunks([unrelated], fake_backend.embed_documents([unrelated.text]))
+    point_id = point_id_for(colliding_chunk_id)
+    before = store.client.retrieve(
+        store.collection,
+        ids=[point_id],
+        with_payload=True,
+        with_vectors=True,
+    )
+    replacement = _chunk(
+        colliding_chunk_id,
+        "target replacement",
+        2026,
+        doc="target",
+    )
+    vectors = fake_backend.embed_documents([replacement.text])
+    original_delete = store.client.delete
+    upsert_calls = 0
+    delete_calls = 0
+
+    def fail_before_write(chunks, dense_vectors):
+        nonlocal upsert_calls
+        upsert_calls += 1
+        raise RuntimeError("failed before primary write")
+
+    def track_delete(*args, **kwargs):
+        nonlocal delete_calls
+        delete_calls += 1
+        return original_delete(*args, **kwargs)
+
+    monkeypatch.setattr(store, "upsert_chunks", fail_before_write)
+    monkeypatch.setattr(store.client, "delete", track_delete)
+
+    error = None
+    try:
+        store.replace_document("target", [replacement], vectors)
+    except Exception as exc:
+        error = exc
+
+    after = store.client.retrieve(
+        store.collection,
+        ids=[point_id],
+        with_payload=True,
+        with_vectors=True,
+    )
+    assert after == before
+    assert upsert_calls == 0
+    assert delete_calls == 0
+    assert isinstance(error, ValueError)
+    assert "collision" in str(error).lower()
+
+
 def test_document_replacements_are_serialized(store, fake_backend, monkeypatch):
     import threading
 

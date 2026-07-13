@@ -199,6 +199,30 @@ class VectorStore:
                 with_vectors=True,
             )
             old_point_ids = {point.id for point in old_points}
+            preexisting_new_points = []
+            if new_point_ids and self.client.collection_exists(self.collection):
+                preexisting_new_points = self.client.retrieve(
+                    collection_name=self.collection,
+                    ids=list(new_point_ids),
+                    with_payload=True,
+                    with_vectors=True,
+                )
+            preexisting_new_point_ids = {
+                point.id for point in preexisting_new_points
+            }
+            collisions = [
+                point
+                for point in preexisting_new_points
+                if (point.payload or {}).get("document_id") != document_id
+            ]
+            if collisions:
+                details = ", ".join(
+                    f"{point.id} owned by {(point.payload or {}).get('document_id')!r}"
+                    for point in collisions
+                )
+                raise ValueError(
+                    f"Qdrant point ID collision for document {document_id!r}: {details}"
+                )
             try:
                 count = self.upsert_chunks(chunks, dense_vectors)
                 self.delete_point_ids(old_point_ids - new_point_ids)
@@ -221,7 +245,7 @@ class VectorStore:
                     except Exception as restore_error:
                         rollback_errors.append(("restore old points", restore_error))
                 try:
-                    self.delete_point_ids(new_point_ids - old_point_ids)
+                    self.delete_point_ids(new_point_ids - preexisting_new_point_ids)
                 except Exception as cleanup_error:
                     rollback_errors.append(("remove inserted points", cleanup_error))
                 if rollback_errors:
