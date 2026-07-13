@@ -39,6 +39,35 @@ def test_ingest_and_list_documents(svc):
     assert docs[0]["fiscal_year"] == 2026
 
 
+def test_service_shares_backend_per_model(tmp_path, monkeypatch, fake_backend):
+    created = []
+
+    def factory(model):
+        created.append(model)
+        return fake_backend
+
+    monkeypatch.setattr("rag_mcp.service.get_backend", factory)
+    cfg = Config(data_dir=tmp_path, qdrant_path=tmp_path / "qdrant")
+    svc = RagService(cfg)
+    retriever = svc._retriever("kure")
+    indexer = svc._indexer("kure")
+    assert created == ["kure"]
+    assert retriever.backend is indexer.backend
+
+
+def test_configured_embedding_model_is_default(tmp_path, fake_backend):
+    cfg = Config(data_dir=tmp_path, qdrant_path=tmp_path / "qdrant", embedding_model="bge_m3")
+    svc = RagService(cfg, backend=fake_backend)
+    svc.ingest_chunks("model-default", [Chunk(chunk_id="model-default::c0", document_id="model-default", text="text")])
+    assert svc.manifests.read("model-default").embedding_model == "bge_m3"
+
+
+def test_empty_collection_status_uses_configured_model(tmp_path, fake_backend):
+    cfg = Config(data_dir=tmp_path, qdrant_path=tmp_path / "qdrant", embedding_model="bge_m3")
+    svc = RagService(cfg, backend=fake_backend)
+    assert "bge_m3" in svc.collection_status()["collections"]
+
+
 def test_search_documents_tool(svc):
     _seed(svc)
     results = svc.search_documents("201-01 한도", top_k=5, fiscal_year=2026)

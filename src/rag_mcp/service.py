@@ -248,7 +248,7 @@ class RagService:
             by_year[key] = by_year.get(key, 0) + 1
         # 모델별 컬렉션 상태
         collections = {}
-        for model in {d.get("embedding_model", "kure") for d in docs} or {"kure"}:
+        for model in {d.get("embedding_model", self.config.embedding_model) for d in docs} or {self.config.embedding_model}:
             collections[model] = self._retriever(model).store.status()
         return {
             "documents": len(docs),
