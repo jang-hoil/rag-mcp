@@ -25,3 +25,6 @@ tests/fixtures/sample_parsed.json
 
 # Claude Code 머신 로컬 설정 (개인별 — 커밋 금지)
 .claude/settings.local.json
+
+# Codex/Superpowers 격리 작업공간
+.worktrees/
