@@ -34,11 +34,26 @@ def _env(key: str, default: str) -> str:
     return val if val else default
 
 
+def validate_document_id(document_id: str) -> str:
+    if not isinstance(document_id, str) or not document_id or document_id in {".", ".."}:
+        raise ValueError(f"안전하지 않은 document_id: {document_id!r}")
+    if any(ch in document_id for ch in "/\\:") or any(ord(ch) < 32 for ch in document_id):
+        raise ValueError(f"안전하지 않은 document_id: {document_id!r}")
+    return document_id
+
+
+def _default_qdrant_path() -> Path:
+    explicit = os.environ.get("RAG_QDRANT_PATH", "").strip()
+    if explicit:
+        return Path(explicit).resolve()
+    return (Path(_env("RAG_DATA_DIR", "./data")).resolve() / "qdrant").resolve()
+
+
 @dataclass
 class Config:
     data_dir: Path = field(default_factory=lambda: Path(_env("RAG_DATA_DIR", "./data")).resolve())
     qdrant_mode: str = field(default_factory=lambda: _env("RAG_QDRANT_MODE", "local"))
-    qdrant_path: Path = field(default_factory=lambda: Path(_env("RAG_QDRANT_PATH", "./data/qdrant")).resolve())
+    qdrant_path: Path = field(default_factory=_default_qdrant_path)
     qdrant_url: str = field(default_factory=lambda: _env("RAG_QDRANT_URL", ""))
     embedding_model: str = field(default_factory=lambda: _env("RAG_EMBEDDING_MODEL", "kure"))
     render_dpi: int = field(default_factory=lambda: int(_env("RAG_RENDER_DPI", "200")))
@@ -52,6 +67,15 @@ class Config:
     odl_hybrid: str = field(default_factory=lambda: _env("RAG_ODL_HYBRID", "off"))
     odl_hybrid_url: str = field(default_factory=lambda: _env("RAG_ODL_HYBRID_URL", ""))
 
+    def __post_init__(self) -> None:
+        if self.qdrant_mode not in {"local", "server"}:
+            raise ValueError("qdrant_mode는 local 또는 server여야 합니다")
+        if self.embedding_model not in COLLECTION_BY_MODEL:
+            raise ValueError(
+                f"알 수 없는 임베딩 모델: {self.embedding_model} "
+                f"(가능: {list(COLLECTION_BY_MODEL)})"
+            )
+
     # 파생 경로
     @property
     def parsed_dir(self) -> Path:
@@ -62,13 +86,21 @@ class Config:
         return self.data_dir / "manifests"
 
     def parsed_doc_dir(self, document_id: str) -> Path:
-        return self.parsed_dir / document_id
+        document_id = validate_document_id(document_id)
+        target = self.parsed_dir / document_id
+        if not target.resolve().is_relative_to(self.parsed_dir.resolve()):
+            raise ValueError(f"안전하지 않은 document_id: {document_id!r}")
+        return target
 
     def pages_dir(self, document_id: str) -> Path:
         return self.parsed_doc_dir(document_id) / "pages"
 
     def manifest_path(self, document_id: str) -> Path:
-        return self.manifests_dir / f"{document_id}.json"
+        document_id = validate_document_id(document_id)
+        target = self.manifests_dir / f"{document_id}.json"
+        if not target.resolve().is_relative_to(self.manifests_dir.resolve()):
+            raise ValueError(f"안전하지 않은 document_id: {document_id!r}")
+        return target
 
     def collection_name(self, embedding_model: str | None = None) -> str:
         model = embedding_model or self.embedding_model
