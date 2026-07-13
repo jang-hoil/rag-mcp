@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 import threading
+import uuid
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Optional
@@ -52,6 +53,8 @@ class RagService:
         # 비동기 ingest: 백그라운드 job 추적 + 동시 ingest 1개 제한(Qdrant local 단일 writer 전제)
         self.jobs = JobStore()
         self._submit_lock = threading.Lock()
+        self._mutation_state_lock = threading.Lock()
+        self._active_mutation: dict[str, str | None] | None = None
         # retriever/indexer 캐시 빌드 보호. 백그라운드 ingest 스레드와 메인 검색 스레드가
         # 같은 모델의 VectorStore(Qdrant local client)를 동시에 두 개 열어 파일락이 충돌하는 것을 막는다.
         # _indexer가 락을 쥔 채 _retriever를 재호출하므로 재진입 가능한 RLock을 쓴다.
@@ -96,6 +99,40 @@ class RagService:
                 store = self._retriever(model).store  # 같은 컬렉션/클라이언트 공유
                 self._indexers[model] = Indexer(self.config, model, backend=self._backend, store=store)
             return self._indexers[model]
+
+    def _reserve_mutation(
+        self, operation: str, job_id: str | None = None
+    ) -> tuple[str | None, dict | None]:
+        with self._mutation_state_lock:
+            if self._active_mutation is not None:
+                active = {
+                    key: value
+                    for key, value in self._active_mutation.items()
+                    if key != "token" and value is not None
+                }
+                return None, {
+                    "ok": False,
+                    "status": "busy",
+                    "error": "다른 쓰기 작업이 진행 중입니다. 완료 후 다시 시도하세요.",
+                    **active,
+                }
+            token = uuid.uuid4().hex
+            self._active_mutation = {
+                "token": token,
+                "operation": operation,
+                "job_id": job_id,
+            }
+            return token, None
+
+    def _attach_mutation_job_id(self, token: str, job_id: str) -> None:
+        with self._mutation_state_lock:
+            if self._active_mutation and self._active_mutation["token"] == token:
+                self._active_mutation["job_id"] = job_id
+
+    def _release_mutation(self, token: str) -> None:
+        with self._mutation_state_lock:
+            if self._active_mutation and self._active_mutation["token"] == token:
+                self._active_mutation = None
 
     # --- 도구 ---
     def search_documents(
@@ -160,6 +197,16 @@ class RagService:
         }
 
     def delete_document(self, document_id: str, confirm: bool = False) -> dict:
+        token, busy = self._reserve_mutation("delete_document")
+        if busy:
+            return busy
+        assert token is not None
+        try:
+            return self._delete_document_unlocked(document_id, confirm=confirm)
+        finally:
+            self._release_mutation(token)
+
+    def _delete_document_unlocked(self, document_id: str, confirm: bool = False) -> dict:
         if not confirm:
             return {"ok": False, "error": "confirm=True 필요(안전 가드)", "document_id": document_id}
         m = self.manifests.read(document_id)
@@ -167,6 +214,16 @@ class RagService:
         return self._indexer(model).delete_document(document_id)
 
     def reindex_document(self, document_id: str, reparse: bool = False) -> dict:
+        token, busy = self._reserve_mutation("reindex_document")
+        if busy:
+            return busy
+        assert token is not None
+        try:
+            return self._reindex_document_unlocked(document_id, reparse=reparse)
+        finally:
+            self._release_mutation(token)
+
+    def _reindex_document_unlocked(self, document_id: str, reparse: bool = False) -> dict:
         m = self.manifests.read(document_id)
         if m is None:
             return {"ok": False, "error": f"문서 없음: {document_id}"}
@@ -194,6 +251,23 @@ class RagService:
         metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None, embedding_model: str = "kure",
     ) -> dict:
         """이미 추출된 청크를 색인 (파서 파이프라인의 종단·테스트용 진입점)."""
+        token, busy = self._reserve_mutation("ingest_chunks")
+        if busy:
+            return busy
+        assert token is not None
+        try:
+            return self._ingest_chunks_unlocked(
+                document_id, chunks, doc_name=doc_name, fiscal_year=fiscal_year,
+                source_path=source_path, metadata=metadata, embedding_model=embedding_model,
+            )
+        finally:
+            self._release_mutation(token)
+
+    def _ingest_chunks_unlocked(
+        self, document_id: str, chunks: list[Chunk], doc_name: str | None = None,
+        fiscal_year: int | None = None, source_path: str | None = None,
+        metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None, embedding_model: str = "kure",
+    ) -> dict:
         m = self._indexer(embedding_model).index_chunks(
             document_id, chunks, doc_name=doc_name, fiscal_year=fiscal_year,
             source_path=source_path, metadata=metadata,
@@ -208,6 +282,22 @@ class RagService:
 
         metadata: 부서·작성자·분류 등 문서 단위 추가 메타. 검색결과 표시·meta.<키> 필터에 사용.
         """
+        token, busy = self._reserve_mutation("ingest_pdf")
+        if busy:
+            return busy
+        assert token is not None
+        try:
+            return self._ingest_pdf_unlocked(
+                path, document_id=document_id, fiscal_year=fiscal_year,
+                doc_name=doc_name, metadata=metadata, embedding_model=embedding_model,
+            )
+        finally:
+            self._release_mutation(token)
+
+    def _ingest_pdf_unlocked(
+        self, path: str, document_id: str | None = None, fiscal_year: int | None = None,
+        doc_name: str | None = None, metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None, embedding_model: str = "kure",
+    ) -> dict:
         if not Path(path).exists():
             return {"ok": False, "error": f"PDF 없음: {path}"}
         try:
@@ -226,7 +316,7 @@ class RagService:
         metadata_values = dict(parsed_metadata.values)
         if meta.get("ocr"):
             metadata_values["ocr"] = meta["ocr"]
-        return self.ingest_chunks(
+        return self._ingest_chunks_unlocked(
             doc_id, chunks, doc_name=meta.get("doc_name", doc_name),
             fiscal_year=meta.get("fiscal_year", fiscal_year), source_path=path,
             metadata=DocumentMetadata(values=metadata_values), embedding_model=embedding_model,
@@ -245,22 +335,21 @@ class RagService:
         if not Path(path).exists():
             return {"ok": False, "error": f"PDF 없음: {path}"}
         doc_id = document_id or Path(path).stem
-        # 동시 ingest 차단은 검사+생성을 원자적으로(두 호출이 동시에 통과하지 않게)
         with self._submit_lock:
-            running = self.jobs.running()
-            if running:
-                j = running[0]
-                return {
-                    "ok": False,
-                    "error": (f"이미 색인 작업이 진행 중입니다(job_id={j.job_id}, "
-                              f"document_id={j.document_id}). ingest_status로 확인하세요."),
-                    "job_id": j.job_id,
-                }
-            job = self.jobs.create(document_id=doc_id)
+            token, busy = self._reserve_mutation("ingest_pdf")
+            if busy:
+                return busy
+            assert token is not None
+            try:
+                job = self.jobs.create(document_id=doc_id)
+                self._attach_mutation_job_id(token, job.job_id)
+            except Exception:
+                self._release_mutation(token)
+                raise
 
         def _run() -> None:
             try:
-                res = self.ingest_pdf(
+                res = self._ingest_pdf_unlocked(
                     path, document_id=document_id, fiscal_year=fiscal_year,
                     doc_name=doc_name, metadata=metadata, embedding_model=embedding_model,
                 )
@@ -270,8 +359,14 @@ class RagService:
                     self.jobs.fail(job.job_id, res.get("error", "알 수 없는 색인 오류"))
             except Exception as e:  # 스레드 예외는 삼켜지므로 job에 기록
                 self.jobs.fail(job.job_id, f"{type(e).__name__}: {e}")
+            finally:
+                self._release_mutation(token)
 
-        threading.Thread(target=_run, name=f"ingest-{doc_id}", daemon=True).start()
+        try:
+            threading.Thread(target=_run, name=f"ingest-{doc_id}", daemon=True).start()
+        except Exception:
+            self._release_mutation(token)
+            raise
         return {"ok": True, "job_id": job.job_id, "status": "running", "document_id": doc_id}
 
     def ingest_status(self, job_id: str) -> dict:
