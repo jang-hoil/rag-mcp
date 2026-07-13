@@ -177,6 +177,11 @@
 - **미수정·보고만(이전 항목 유지)**: 검색 관련도 임계값 없음(무관 쿼리도 top_k 반환, 표준 동작) /
   qdrant_path가 RAG_DATA_DIR 미추종 / 본문 800자 고정 절단 / sparse tf 비포화 등.
 
+### ✅ 완료 (2026-07-13) — 안전성 보강 문서 반영
+- `RAG_QDRANT_PATH` 미설정 시 `<RAG_DATA_DIR>/qdrant`를 기본 경로로 사용한다.
+- `ingest_pdf`는 전달된 PDF를 새로 파싱해 색인하며, 색인 중 변경 작업은 `status="busy"`로 거부한다.
+- README와 MCP 연동 가이드의 MCP 도구 수(9개) 및 운영 동작을 갱신했다.
+
 ## 구현된 모듈 지도 (참고)
 - `config.py` 모델별 컬렉션/차원 · `models.py` Chunk/SearchResult/Manifest
 - `tokenizer.py`(코드/금액 보존)+`sparse.py`(blake2b idx, tf, IDF modifier 전제)
