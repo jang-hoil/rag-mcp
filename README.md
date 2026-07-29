@@ -489,6 +489,10 @@ Claude Desktop 중심으로 사용할 때는 자주 쓰지 않아도 되지만, 
 
 Qdrant local path 모드는 **동시에 하나의 프로세스만** 접근해야 합니다.
 
+Qdrant 컬렉션은 임베딩 모델과 문서별로 분리됩니다. 이름은
+`rag_<model>_<정규화된 document_id>_<원본 ID blake2b 6자리>` 형식이며,
+문서별 sparse IDF 통계가 다른 지침의 어휘 빈도에 섞이지 않습니다.
+
 `RAG_QDRANT_PATH`를 지정하지 않으면 저장 경로는 `<RAG_DATA_DIR>/qdrant`로 자동 결정됩니다. `ingest_pdf`는 전달한 PDF를 매번 새로 파싱한 뒤 색인하므로, 같은 경로의 변환 캐시가 남아 있어도 최신 PDF 내용으로 갱신됩니다. 색인 중에는 다른 변경 작업(`ingest_pdf`, `ingest_chunks`, `delete_document`, `reindex_document`)이 실행되지 않으며, 해당 도구는 현재 작업이 끝난 뒤 다시 시도하라는 `status="busy"` 응답을 반환합니다. 검색·조회 도구는 계속 사용할 수 있습니다.
 
 Claude Desktop에 MCP로 연결해 쓰는 동안에는 다른 터미널에서 `uv run rag-mcp ingest`를 실행하지 마세요. PDF 색인은 Claude Desktop에서 `ingest_pdf`로 요청하는 것이 안전합니다.

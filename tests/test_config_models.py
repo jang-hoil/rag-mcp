@@ -9,9 +9,31 @@ from rag_mcp.models import Chunk, Manifest, SearchResult, SearchSource
 
 def test_collection_by_model():
     cfg = Config()
-    assert cfg.collection_name("kure") == "rag_kure_chunks"
-    assert cfg.collection_name("bge_m3") == "rag_bge_m3_chunks"
+    assert (
+        cfg.collection_name("kure", "2026 공직윤리 실무과정")
+        == "rag_kure_2026_공직윤리_실무과정_4b9257"
+    )
+    assert (
+        cfg.collection_name("bge_m3", "2026 예산지침(최종)")
+        == "rag_bge_m3_2026_예산지침최종_160361"
+    )
     assert cfg.dimension("kure") == 1024
+
+
+def test_collection_name_requires_document_id():
+    cfg = Config()
+    with pytest.raises(ValueError, match="document_id가 필요합니다"):
+        cfg.collection_name("kure", None)
+    with pytest.raises(ValueError, match="document_id가 필요합니다"):
+        cfg.collection_name("kure", "   ")
+
+
+def test_collection_name_hash_prevents_normalization_collision():
+    cfg = Config()
+    left = cfg.collection_name("kure", "예산 지침")
+    right = cfg.collection_name("kure", "예산_지침")
+    assert left.rsplit("_", 1)[0] == right.rsplit("_", 1)[0]
+    assert left != right
 
 
 def test_ocr_default_uses_auto_triage():
@@ -22,7 +44,7 @@ def test_ocr_default_uses_auto_triage():
 def test_unknown_model_raises():
     cfg = Config()
     try:
-        cfg.collection_name("gpt")
+        cfg.collection_name("gpt", "문서")
         assert False, "알 수 없는 모델인데 예외 미발생"
     except ValueError:
         pass

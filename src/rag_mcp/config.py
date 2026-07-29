@@ -5,7 +5,9 @@
 """
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -102,11 +104,24 @@ class Config:
             raise ValueError(f"안전하지 않은 document_id: {document_id!r}")
         return target
 
-    def collection_name(self, embedding_model: str | None = None) -> str:
+    def collection_name(
+        self,
+        embedding_model: str | None = None,
+        document_id: str | None = None,
+    ) -> str:
         model = embedding_model or self.embedding_model
         if model not in COLLECTION_BY_MODEL:
             raise ValueError(f"알 수 없는 임베딩 모델: {model} (가능: {list(COLLECTION_BY_MODEL)})")
-        return COLLECTION_BY_MODEL[model]
+        if not isinstance(document_id, str) or not document_id.strip():
+            raise ValueError("컬렉션 이름을 만들려면 document_id가 필요합니다")
+
+        # 사람이 알아볼 수 있는 이름은 유지하되 Qdrant 이름에 부적합한 문자는 제거한다.
+        # 서로 다른 원본이 같은 정규화 결과가 되어도 원본 해시가 컬렉션 충돌을 막는다.
+        normalized = re.sub(r"\s+", "_", document_id.strip())
+        normalized = re.sub(r"[^\w]", "", normalized, flags=re.UNICODE)
+        normalized = re.sub(r"_+", "_", normalized).strip("_") or "document"
+        digest = hashlib.blake2b(document_id.encode("utf-8"), digest_size=3).hexdigest()
+        return f"rag_{model}_{normalized}_{digest}"
 
     def dimension(self, embedding_model: str | None = None) -> int:
         model = embedding_model or self.embedding_model
