@@ -16,9 +16,15 @@ def env(tmp_path, fake_backend):
     os.environ["RAG_DATA_DIR"] = str(tmp_path)
     try:
         cfg = Config()
-        store = VectorStore(cfg, embedding_model="kure")
-        indexer = Indexer(cfg, embedding_model="kure", backend=fake_backend, store=store)
-        retriever = Retriever(cfg, embedding_model="kure", backend=fake_backend, store=store)
+        store = VectorStore(cfg, embedding_model="kure", document_id="d1")
+        indexer = Indexer(
+            cfg, embedding_model="kure", document_id="d1",
+            backend=fake_backend, store=store,
+        )
+        retriever = Retriever(
+            cfg, embedding_model="kure", document_id="d1",
+            backend=fake_backend, store=store,
+        )
         yield cfg, indexer, retriever
     finally:
         os.environ.pop("RAG_QDRANT_PATH", None)
@@ -60,7 +66,16 @@ def test_fiscal_year_filter_excludes_other_year(env):
     cfg, indexer, retriever = env
     all_chunks = _chunks()
     indexer.index_chunks("d1", [c for c in all_chunks if c.document_id == "d1"], fiscal_year=2026)
-    indexer.index_chunks("d2", [c for c in all_chunks if c.document_id == "d2"], fiscal_year=2025)
+    d2_store = VectorStore(
+        cfg, embedding_model="kure", document_id="d2", client=indexer.store.client
+    )
+    d2_indexer = Indexer(
+        cfg, embedding_model="kure", document_id="d2",
+        backend=indexer.backend, store=d2_store,
+    )
+    d2_indexer.index_chunks(
+        "d2", [c for c in all_chunks if c.document_id == "d2"], fiscal_year=2025
+    )
     results = retriever.search("일상경비 단가", top_k=5, fiscal_year=2026)
     assert all(r.source.fiscal_year == 2026 for r in results)
     assert "d2::c0" not in [r.chunk_id for r in results]

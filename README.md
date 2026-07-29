@@ -395,17 +395,21 @@ PDF 경로는 C:\문서\2026_예산편성지침.pdf 이야.
 ### 검색할 때
 
 ```text
-2026년 예산 지침에서 일상경비 한도를 찾아줘.
+list_documents에서 확인한 document_id가 `2026년 공직윤리 실무과정`인 지침에서
+일상경비 한도를 찾아줘.
 근거 페이지와 청크 내용을 같이 보여줘.
 ```
 
 또는:
 
 ```text
+document_id `pas_public_audit_info_system_manual_v1_01_2023`에서
 201-01 일반수용비 관련 규정을 검색해줘.
 ```
 
 Claude Desktop은 내부적으로 `search_documents` 도구를 호출해 결과를 가져옵니다.
+검색은 문서별 sparse IDF를 사용하므로 `document_id`가 필수이며, 모르면 먼저
+`list_documents`로 사용할 값을 확인합니다.
 
 ### 문서를 삭제할 때
 
@@ -426,7 +430,7 @@ list_documents로 색인된 문서를 보여줘.
 | 새 PDF 넣기 전 점검 | "이 PDF 색인 전에 review_before_ingest로 현재 목록 보여줘. 경로는 `C:\문서\2026예산.pdf`" | `review_before_ingest` |
 | PDF 색인 시작 | "이 PDF를 fiscal_year 2026으로 색인해줘. 경로는 `C:\문서\2026예산.pdf`" | `ingest_pdf` |
 | 색인 진행 확인 | "방금 job_id로 진행 상태 확인해줘" | `ingest_status` |
-| 검색(질문) | "2026 예산 지침에서 일상경비 한도 찾아줘. 근거 페이지도 같이" | `search_documents` |
+| 검색(질문) | "document_id가 `2026 예산지침`인 문서에서 일상경비 한도 찾아줘. 근거 페이지도 같이" | `search_documents` |
 | 문서 목록 보기 | "색인된 문서 목록 보여줘" | `list_documents` |
 | 특정 청크 원문 | "이 chunk_id 원문 보여줘" | `get_chunk` |
 | 문서 삭제 | "이 문서 삭제해줘, confirm=True로" | `delete_document` |

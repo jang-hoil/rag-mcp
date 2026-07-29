@@ -18,7 +18,7 @@ def store(tmp_path):
     os.environ["RAG_DATA_DIR"] = str(tmp_path)
     try:
         cfg = Config()
-        yield VectorStore(cfg, embedding_model="kure")
+        yield VectorStore(cfg, embedding_model="kure", document_id="doc1")
     finally:
         os.environ.pop("RAG_QDRANT_PATH", None)
         os.environ.pop("RAG_DATA_DIR", None)
@@ -28,7 +28,7 @@ def _seed(store, fake_backend):
     chunks = [
         _chunk("doc1::c0", "201-01 일반수용비 한도 50,000,000원", 2026, has_code=True, has_amount=True, is_table=True),
         _chunk("doc1::c1", "명시이월 요건과 절차", 2026),
-        _chunk("doc2::c0", "2025년 단가 기준 (혼입 금지)", 2025, doc="doc2"),
+        _chunk("doc1::c2", "2025년 단가 기준", 2025),
     ]
     vecs = fake_backend.embed_documents([c.text for c in chunks])
     n = store.upsert_chunks(chunks, vecs)
@@ -38,8 +38,8 @@ def _seed(store, fake_backend):
 def test_upsert_and_count(store, fake_backend):
     _, n = _seed(store, fake_backend)
     assert n == 3
-    assert store.count_by_document("doc1") == 2
-    assert store.count_by_document("doc2") == 1
+    assert store.count_by_document("doc1") == 3
+    assert store.count_by_document("doc2") == 0
 
 
 def test_hybrid_search_finds_code_chunk(store, fake_backend):
@@ -61,7 +61,7 @@ def test_fiscal_year_filter(store, fake_backend):
     points = store.query(qd, qs, top_k=5, search_mode="hybrid", fiscal_year=2026)
     years = [p.payload["fiscal_year"] for p in points]
     assert all(y == 2026 for y in years), years
-    assert "doc2::c0" not in [p.payload["chunk_id"] for p in points]
+    assert "doc1::c2" not in [p.payload["chunk_id"] for p in points]
 
 
 def test_sparse_only_exact_code(store, fake_backend):
@@ -80,7 +80,7 @@ def test_reindex_idempotent_no_duplicates(store, fake_backend):
     doc1_chunks = [c for c in chunks if c.document_id == "doc1"]
     vecs = fake_backend.embed_documents([c.text for c in doc1_chunks])
     store.upsert_chunks(doc1_chunks, vecs)
-    assert store.count_by_document("doc1") == 2  # 4가 아님
+    assert store.count_by_document("doc1") == 3  # 6이 아님
 
 
 def test_local_storage_lock_friendly_error(store):
@@ -91,7 +91,7 @@ def test_local_storage_lock_friendly_error(store):
     # RuntimeError 서브클래스라 기존 except RuntimeError 경로와도 호환된다.
     assert issubclass(StorageBusyError, RuntimeError)
     with pytest.raises(StorageBusyError, match="사용 중"):
-        VectorStore(cfg, embedding_model="kure")
+        VectorStore(cfg, embedding_model="kure", document_id="doc1")
 
 
 def test_server_mode_without_url_raises(tmp_path, monkeypatch):
@@ -100,7 +100,7 @@ def test_server_mode_without_url_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("RAG_QDRANT_URL", "")
     monkeypatch.setenv("RAG_QDRANT_PATH", str(tmp_path / "qdrant"))
     with pytest.raises(ValueError, match="RAG_QDRANT_URL"):
-        VectorStore(Config(), embedding_model="kure")
+        VectorStore(Config(), embedding_model="kure", document_id="doc1")
 
 
 def test_point_id_stable():
@@ -125,7 +125,7 @@ def test_concurrent_query_during_upsert_is_safe(store, fake_backend):
                 if stop.is_set():
                     break
                 cid = f"docw::c{i}"
-                ch = _chunk(cid, f"동시성 문서 {i}", 2026, doc="docw")
+                ch = _chunk(cid, f"동시성 문서 {i}", 2026)
                 store.upsert_chunks([ch], fake_backend.embed_documents([ch.text]))
         except Exception as e:  # pragma: no cover - 실패 시 메시지 확인용
             errors.append(("writer", repr(e)))
@@ -145,14 +145,14 @@ def test_concurrent_query_during_upsert_is_safe(store, fake_backend):
     tw.start(); tr.start()
     tw.join(10); stop.set(); tr.join(10)
     assert not errors, errors
-    assert store.count_by_document("docw") == 20
+    assert store.count_by_document("doc1") == 23
 
 
 def test_replace_document_reports_rollback_failure(store, fake_backend, monkeypatch):
     _seed(store, fake_backend)
     replacement = [
         _chunk("doc1::c0", "replacement", 2026),
-        _chunk("doc1::c2", "inserted only", 2026),
+        _chunk("doc1::c3", "inserted only", 2026),
     ]
     vectors = fake_backend.embed_documents([chunk.text for chunk in replacement])
     original_upsert = store.client.upsert
@@ -174,70 +174,22 @@ def test_replace_document_reports_rollback_failure(store, fake_backend, monkeypa
     message = str(excinfo.value)
     assert "primary upsert failure" in message
     assert "restore failure" in message
-    assert store.retrieve_chunk("doc1::c2") is None
+    assert store.retrieve_chunk("doc1::c3") is None
 
 
-def test_replace_document_rejects_collection_global_point_id_collision(
-    store,
-    fake_backend,
-    monkeypatch,
-):
-    colliding_chunk_id = "shared::c0"
+def test_document_collection_rejects_foreign_document_chunks(store, fake_backend):
     unrelated = _chunk(
-        colliding_chunk_id,
-        "unrelated original",
+        "unrelated::c0",
+        "다른 문서 본문",
         2026,
         doc="unrelated",
     )
-    store.upsert_chunks([unrelated], fake_backend.embed_documents([unrelated.text]))
-    point_id = point_id_for(colliding_chunk_id)
-    before = store.client.retrieve(
-        store.collection,
-        ids=[point_id],
-        with_payload=True,
-        with_vectors=True,
-    )
-    replacement = _chunk(
-        colliding_chunk_id,
-        "target replacement",
-        2026,
-        doc="target",
-    )
-    vectors = fake_backend.embed_documents([replacement.text])
-    original_delete = store.client.delete
-    upsert_calls = 0
-    delete_calls = 0
+    vectors = fake_backend.embed_documents([unrelated.text])
 
-    def fail_before_write(chunks, dense_vectors):
-        nonlocal upsert_calls
-        upsert_calls += 1
-        raise RuntimeError("failed before primary write")
+    with pytest.raises(ValueError, match="다른 청크"):
+        store.upsert_chunks([unrelated], vectors)
 
-    def track_delete(*args, **kwargs):
-        nonlocal delete_calls
-        delete_calls += 1
-        return original_delete(*args, **kwargs)
-
-    monkeypatch.setattr(store, "upsert_chunks", fail_before_write)
-    monkeypatch.setattr(store.client, "delete", track_delete)
-
-    error = None
-    try:
-        store.replace_document("target", [replacement], vectors)
-    except Exception as exc:
-        error = exc
-
-    after = store.client.retrieve(
-        store.collection,
-        ids=[point_id],
-        with_payload=True,
-        with_vectors=True,
-    )
-    assert after == before
-    assert upsert_calls == 0
-    assert delete_calls == 0
-    assert isinstance(error, ValueError)
-    assert "collision" in str(error).lower()
+    assert not store.client.collection_exists(store.collection)
 
 
 def test_document_replacements_are_serialized(store, fake_backend, monkeypatch):

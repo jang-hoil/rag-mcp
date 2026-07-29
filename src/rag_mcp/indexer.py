@@ -23,13 +23,17 @@ class Indexer:
         self,
         config: Config,
         embedding_model: str = "kure",
+        document_id: str | None = None,
         backend: EmbeddingBackend | None = None,
         store: VectorStore | None = None,
     ):
         self.config = config
         self.embedding_model = embedding_model
+        if document_id is None:
+            raise ValueError("Indexer를 만들려면 document_id가 필요합니다")
+        self.document_id = document_id
         self._backend = backend
-        self.store = store or VectorStore(config, embedding_model)
+        self.store = store or VectorStore(config, embedding_model, document_id)
         self.manifests = ManifestStore(config)
 
     @property
@@ -80,6 +84,10 @@ class Indexer:
 
         metadata: 문서 단위 추가 메타. 각 청크 meta에 병합되어 payload·검색결과·필터에 반영.
         """
+        if document_id != self.document_id:
+            raise ValueError(
+                f"Indexer document_id({self.document_id})와 요청 document_id({document_id})가 다릅니다"
+            )
         if not chunks or any(not chunk.text.strip() for chunk in chunks):
             raise ValueError("색인할 유효 청크가 없습니다")
 

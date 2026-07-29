@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Optional
 
-from .config import Config, load_config
+from .config import COLLECTION_BY_MODEL, Config, load_config
 from .embeddings import EmbeddingBackend, get_backend
 from .indexer import Indexer
 from .jobs import JobStore
@@ -20,7 +20,7 @@ from .manifest import ManifestStore
 from .models import Chunk
 from .request_models import DocumentMetadata, JsonValue, SearchFilters
 from .retrieval import Retriever
-from .vector_store import VectorStore
+from .vector_store import VectorStore, open_qdrant_client
 
 # 검색 상한 (MCP는 LLM이 인자를 채우므로 과도한 limit 방어)
 _MAX_TOP_K = 100
@@ -48,8 +48,9 @@ class RagService:
         self.config = config or load_config()
         self._backend = backend
         self._backends: dict[str, EmbeddingBackend] = {}
-        self._retrievers: dict[str, Retriever] = {}
-        self._indexers: dict[str, Indexer] = {}
+        self._retrievers: dict[tuple[str, str], Retriever] = {}
+        self._indexers: dict[tuple[str, str], Indexer] = {}
+        self._qdrant_client = None
         self.manifests = ManifestStore(self.config)
         # 비동기 ingest: 백그라운드 job 추적 + 동시 ingest 1개 제한(Qdrant local 단일 writer 전제)
         self.jobs = JobStore()
@@ -69,12 +70,30 @@ class RagService:
                 self._backends[model] = get_backend(model)
             return self._backends[model]
 
-    def _retriever(self, model: str) -> Retriever:
+    def _client(self):
         with self._resource_lock:
-            if model not in self._retrievers:
-                store = VectorStore(self.config, model)
-                self._retrievers[model] = Retriever(self.config, model, backend=self._embedding_backend(model), store=store)
-            return self._retrievers[model]
+            if self._qdrant_client is None:
+                self._qdrant_client = open_qdrant_client(self.config)
+            return self._qdrant_client
+
+    def _retriever(self, model: str, document_id: str) -> Retriever:
+        key = (model, document_id)
+        with self._resource_lock:
+            if key not in self._retrievers:
+                store = VectorStore(
+                    self.config,
+                    model,
+                    document_id,
+                    client=self._client(),
+                )
+                self._retrievers[key] = Retriever(
+                    self.config,
+                    model,
+                    document_id,
+                    backend=self._embedding_backend(model),
+                    store=store,
+                )
+            return self._retrievers[key]
 
     def preflight(self, model: str | None = None) -> None:
         """Qdrant local 저장소를 즉시 열어 단일 인스턴스 여부를 판정한다(락 선점).
@@ -85,7 +104,7 @@ class RagService:
         (backend는 lazy) 밀리초 단위로 끝나 startup을 막지 않는다. 여기서 캐시된 store는
         이후 warmup·검색이 그대로 재사용한다(같은 Qdrant client 공유 — 중복 open 없음).
         """
-        self._retriever(model or self.config.embedding_model)
+        self._client()
 
     def warmup(self, model: str | None = None) -> None:
         """임베딩 모델·토크나이저를 미리 메모리에 올린다(첫 검색의 콜드 스타트 제거).
@@ -96,18 +115,25 @@ class RagService:
         """
         model = model or self.config.embedding_model
         # 더미 임베딩으로 SentenceTransformer 실제 로드를 강제(lazy 트리거).
-        self._retriever(model).backend.embed_query("워밍업")
+        self._embedding_backend(model).embed_query("워밍업")
         # Kiwi 토크나이저도 첫 호출 시 로딩되므로 함께 데운다(sparse 검색 콜드 스타트 제거).
         from .sparse import to_sparse
 
         to_sparse("워밍업")
 
-    def _indexer(self, model: str) -> Indexer:
+    def _indexer(self, model: str, document_id: str) -> Indexer:
+        key = (model, document_id)
         with self._resource_lock:
-            if model not in self._indexers:
-                store = self._retriever(model).store  # 같은 컬렉션/클라이언트 공유
-                self._indexers[model] = Indexer(self.config, model, backend=self._embedding_backend(model), store=store)
-            return self._indexers[model]
+            if key not in self._indexers:
+                store = self._retriever(model, document_id).store
+                self._indexers[key] = Indexer(
+                    self.config,
+                    model,
+                    document_id,
+                    backend=self._embedding_backend(model),
+                    store=store,
+                )
+            return self._indexers[key]
 
     def _reserve_mutation(
         self, operation: str, job_id: str | None = None
@@ -145,10 +171,17 @@ class RagService:
 
     # --- 도구 ---
     def search_documents(
-        self, query: str, top_k: int = 8, search_mode: str = "hybrid",
+        self, query: str, document_id: str | None = None, top_k: int = 8, search_mode: str = "hybrid",
         embedding_model: str | None = None, fusion: str = "rrf",
         fiscal_year: int | None = None, filters: Mapping[str, JsonValue] | SearchFilters | None = None,
     ) -> list[dict]:
+        if not document_id:
+            available = [doc["document_id"] for doc in self.list_documents()]
+            choices = ", ".join(available) if available else "없음"
+            raise ValueError(
+                "search_documents에는 document_id가 필요합니다. "
+                f"사용 가능한 document_id: {choices}"
+            )
         if not query or not query.strip():
             return []
         if search_mode not in ("hybrid", "dense", "sparse"):
@@ -162,7 +195,7 @@ class RagService:
         parsed_filters = SearchFilters.from_raw(filters)
         parsed_filters.ensure_allowed(_ALLOWED_FILTER_KEYS)
         model = embedding_model or self.config.embedding_model
-        results = self._retriever(model).search(
+        results = self._retriever(model, document_id).search(
             query, top_k=top_k, search_mode=search_mode, fusion=fusion,
             fiscal_year=fiscal_year, filters=parsed_filters.to_qdrant(),
         )
@@ -170,22 +203,67 @@ class RagService:
 
     def get_chunk(self, chunk_id: str, embedding_model: str | None = None) -> dict:
         model = embedding_model or self.config.embedding_model
-        r = self._retriever(model).get_chunk(chunk_id)
+        if "::" not in chunk_id:
+            return {"ok": False, "error": f"청크 없음: {chunk_id}"}
+        document_id = chunk_id.split("::", 1)[0]
+        r = self._retriever(model, document_id).get_chunk(chunk_id)
         if r is None:
             return {"ok": False, "error": f"청크 없음: {chunk_id}"}
         return {"ok": True, **r.model_dump()}
 
     def list_documents(self) -> list[dict]:
+        """실제로 존재하는 문서별 컬렉션을 기준으로 색인 문서 목록을 반환한다."""
         out = []
-        for m in self.manifests.list_all():
+        manifests = self.manifests.list_all()
+        manifest_by_collection = {
+            self.config.collection_name(m.embedding_model, m.document_id): m
+            for m in manifests
+        }
+        client = self._client()
+        for collection in client.get_collections().collections:
+            name = collection.name
+            m = manifest_by_collection.get(name)
+            if m is not None:
+                out.append({
+                    "document_id": m.document_id,
+                    "doc_name": m.doc_name,
+                    "fiscal_year": m.fiscal_year,
+                    "num_chunks": self._retriever(m.embedding_model, m.document_id).store.count_by_document(m.document_id),
+                    "status": m.status,
+                    "embedding_model": m.embedding_model,
+                    "collection": name,
+                })
+                continue
+
+            model = next(
+                (candidate for candidate in COLLECTION_BY_MODEL if name.startswith(f"rag_{candidate}_")),
+                None,
+            )
+            if model is None:
+                continue
+            points, _ = client.scroll(
+                collection_name=name,
+                limit=1,
+                with_payload=True,
+                with_vectors=False,
+            )
+            if not points:
+                continue
+            payload = points[0].payload or {}
+            document_id = payload.get("document_id")
+            if not document_id:
+                continue
+            info = client.get_collection(name)
             out.append({
-                "document_id": m.document_id,
-                "doc_name": m.doc_name,
-                "fiscal_year": m.fiscal_year,
-                "num_chunks": m.num_chunks,
-                "status": m.status,
-                "embedding_model": m.embedding_model,
+                "document_id": document_id,
+                "doc_name": payload.get("doc_name"),
+                "fiscal_year": payload.get("fiscal_year"),
+                "num_chunks": info.points_count or 0,
+                "status": "done",
+                "embedding_model": model,
+                "collection": name,
             })
+        out.sort(key=lambda item: item["document_id"])
         return out
 
     def review_before_ingest(self, pdf_path: str) -> dict:
@@ -222,7 +300,7 @@ class RagService:
             return {"ok": False, "error": "confirm=True 필요(안전 가드)", "document_id": document_id}
         m = self.manifests.read(document_id)
         model = m.embedding_model if m else self.config.embedding_model
-        return self._indexer(model).delete_document(document_id)
+        return self._indexer(model, document_id).delete_document(document_id)
 
     def reindex_document(self, document_id: str, reparse: bool = False) -> dict:
         token, busy = self._reserve_mutation("reindex_document")
@@ -238,7 +316,7 @@ class RagService:
         m = self.manifests.read(document_id)
         if m is None:
             return {"ok": False, "error": f"문서 없음: {document_id}"}
-        return self._indexer(m.embedding_model).reindex_document(document_id, reparse=reparse)
+        return self._indexer(m.embedding_model, document_id).reindex_document(document_id, reparse=reparse)
 
     def collection_status(self) -> dict:
         docs = self.list_documents()
@@ -246,10 +324,13 @@ class RagService:
         for d in docs:
             key = str(d.get("fiscal_year"))
             by_year[key] = by_year.get(key, 0) + 1
-        # 모델별 컬렉션 상태
+        # 실제 문서별 컬렉션 상태
         collections = {}
-        for model in {d.get("embedding_model", self.config.embedding_model) for d in docs} or {self.config.embedding_model}:
-            collections[model] = self._retriever(model).store.status()
+        for d in docs:
+            model = d.get("embedding_model", self.config.embedding_model)
+            document_id = d["document_id"]
+            status = self._retriever(model, document_id).store.status()
+            collections[status["collection"]] = status
         return {
             "documents": len(docs),
             "by_fiscal_year": by_year,
@@ -279,7 +360,7 @@ class RagService:
         fiscal_year: int | None = None, source_path: str | None = None,
         metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None, embedding_model: str | None = None,
     ) -> dict:
-        m = self._indexer(embedding_model).index_chunks(
+        m = self._indexer(embedding_model, document_id).index_chunks(
             document_id, chunks, doc_name=doc_name, fiscal_year=fiscal_year,
             source_path=source_path, metadata=metadata,
         )

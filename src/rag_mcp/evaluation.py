@@ -191,7 +191,12 @@ def format_report(
     return "\n".join(L)
 
 
-def run(goldset_path: str, fetch_k: int = 50, embedding_model: str = "kure") -> dict:
+def run(
+    goldset_path: str,
+    fetch_k: int = 50,
+    embedding_model: str = "kure",
+    document_id: str | None = None,
+) -> dict:
     """골든셋을 실제 색인에 대해 평가(read-only). RagService.search_documents만 호출한다."""
     from .service import RagService
 
@@ -200,7 +205,8 @@ def run(goldset_path: str, fetch_k: int = 50, embedding_model: str = "kure") -> 
 
     def search_fn(query: str, top_k: int, fiscal_year: Optional[int] = None) -> list[dict]:
         return svc.search_documents(
-            query, top_k=top_k, fiscal_year=fiscal_year, embedding_model=embedding_model
+            query, document_id=document_id, top_k=top_k,
+            fiscal_year=fiscal_year, embedding_model=embedding_model,
         )
 
     return evaluate(search_fn, cases, fetch_k=fetch_k)

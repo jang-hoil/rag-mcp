@@ -49,8 +49,8 @@ def test_service_shares_backend_per_model(tmp_path, monkeypatch, fake_backend):
     monkeypatch.setattr("rag_mcp.service.get_backend", factory)
     cfg = Config(data_dir=tmp_path, qdrant_path=tmp_path / "qdrant")
     svc = RagService(cfg)
-    retriever = svc._retriever("kure")
-    indexer = svc._indexer("kure")
+    retriever = svc._retriever("kure", "문서")
+    indexer = svc._indexer("kure", "문서")
     assert created == ["kure"]
     assert retriever.backend is indexer.backend
 
@@ -65,12 +65,12 @@ def test_configured_embedding_model_is_default(tmp_path, fake_backend):
 def test_empty_collection_status_uses_configured_model(tmp_path, fake_backend):
     cfg = Config(data_dir=tmp_path, qdrant_path=tmp_path / "qdrant", embedding_model="bge_m3")
     svc = RagService(cfg, backend=fake_backend)
-    assert "bge_m3" in svc.collection_status()["collections"]
+    assert svc.collection_status()["collections"] == {}
 
 
 def test_search_documents_tool(svc):
     _seed(svc)
-    results = svc.search_documents("201-01 한도", top_k=5, fiscal_year=2026)
+    results = svc.search_documents("201-01 한도", document_id="d1", top_k=5, fiscal_year=2026)
     assert results, "검색 결과 없음"
     assert any(r["chunk_id"] == "d1::c0" for r in results)
     top = next(r for r in results if r["chunk_id"] == "d1::c0")
@@ -78,9 +78,34 @@ def test_search_documents_tool(svc):
     assert top["source"]["page_image"].endswith("p9.png")
 
 
+def test_search_requires_document_id_and_lists_available_documents(svc):
+    _seed(svc)
+    with pytest.raises(ValueError, match=r"document_id가 필요합니다.*d1"):
+        svc.search_documents("일반수용비")
+
+
+def test_each_document_uses_its_own_collection(svc):
+    _seed(svc)
+    svc.ingest_chunks(
+        "d2",
+        [Chunk(chunk_id="d2::c0", document_id="d2", text="다른 지침")],
+    )
+    d1_store = svc._retriever("kure", "d1").store
+    d2_store = svc._retriever("kure", "d2").store
+    assert d1_store.collection != d2_store.collection
+    assert d1_store.count_by_document("d1") == 2
+    assert d1_store.count_by_document("d2") == 0
+    assert d2_store.count_by_document("d2") == 1
+
+
+def test_list_documents_ignores_manifest_without_collection(svc):
+    svc.manifests.update("manifest-only", status="done", num_chunks=3)
+    assert svc.list_documents() == []
+
+
 def test_warmup_loads_backend(svc):
     """warmup()은 임베딩 백엔드와 토크나이저를 미리 데워 첫 검색 콜드 스타트를 없앤다."""
-    backend = svc._retriever("kure").backend  # 캐시되는 동일 인스턴스
+    backend = svc._retriever("kure", "d1").backend  # 캐시되는 동일 인스턴스
     calls: list[str] = []
     orig = backend.embed_query
     backend.embed_query = lambda text: (calls.append(text), orig(text))[1]
@@ -91,17 +116,17 @@ def test_warmup_loads_backend(svc):
 def test_search_invalid_mode_raises(svc):
     _seed(svc)
     with pytest.raises(ValueError):
-        svc.search_documents("x", search_mode="fuzzy")
+        svc.search_documents("x", document_id="d1", search_mode="fuzzy")
 
 
 def test_search_invalid_fusion_raises(svc):
     """fusion 오타(예: 'rff')가 조용히 RRF로 동작하지 않게 명시 검증."""
     _seed(svc)
     with pytest.raises(ValueError):
-        svc.search_documents("x", fusion="rff")
+        svc.search_documents("x", document_id="d1", fusion="rff")
     # 정상값은 통과
-    svc.search_documents("일반수용비", fusion="dbsf")
-    svc.search_documents("일반수용비", fusion="rrf")
+    svc.search_documents("일반수용비", document_id="d1", fusion="dbsf")
+    svc.search_documents("일반수용비", document_id="d1", fusion="rrf")
 
 
 def test_search_top_k_out_of_range_raises(svc):
@@ -109,19 +134,19 @@ def test_search_top_k_out_of_range_raises(svc):
     # 하한(0·음수)·상한(100 초과)·bool(True가 1로 통과하는 함정) 모두 거부
     for bad in (0, -1, 101, True):
         with pytest.raises(ValueError):
-            svc.search_documents("x", top_k=bad)
+            svc.search_documents("x", document_id="d1", top_k=bad)
 
 
 def test_search_rejects_unknown_filter_key(svc):
     _seed(svc)
     with pytest.raises(ValueError):
-        svc.search_documents("x", filters={"unknown_field": 1})
+        svc.search_documents("x", document_id="d1", filters={"unknown_field": 1})
 
 
 def test_search_accepts_allowed_filter_key(svc):
     _seed(svc)
     # is_table=True인 d1::c0만 후보로 남아야 함(에러 없이 동작)
-    results = svc.search_documents("일반수용비 한도", filters={"is_table": True})
+    results = svc.search_documents("일반수용비 한도", document_id="d1", filters={"is_table": True})
     assert all(r["source"]["is_table"] for r in results)
 
 
@@ -130,7 +155,7 @@ def test_metadata_stored_and_shown(svc):
     chunks = [Chunk(chunk_id="m1::c0", document_id="m1", text="201-01 일반수용비 한도", fiscal_year=2026)]
     svc.ingest_chunks("m1", chunks, doc_name="2026 예산기준", fiscal_year=2026,
                       metadata={"부서": "예산과", "작성자": "홍길동"})
-    res = svc.search_documents("일반수용비 한도", fiscal_year=2026)
+    res = svc.search_documents("일반수용비 한도", document_id="m1", fiscal_year=2026)
     assert res, "검색 결과 없음"
     assert res[0]["source"]["meta"]["부서"] == "예산과"
     assert res[0]["source"]["meta"]["작성자"] == "홍길동"
@@ -143,7 +168,7 @@ def test_metadata_filter_narrows_search(svc):
                       metadata={"부서": "예산과"})
     svc.ingest_chunks("m3", [Chunk(chunk_id="m3::c0", document_id="m3", text=common, fiscal_year=2026)],
                       metadata={"부서": "회계과"})
-    res = svc.search_documents(common, filters={"meta.부서": "예산과"})
+    res = svc.search_documents(common, document_id="m2", filters={"meta.부서": "예산과"})
     assert res, "필터 결과 없음"
     assert all(r["source"]["meta"].get("부서") == "예산과" for r in res)
     assert all(r["source"]["document_id"] == "m2" for r in res)
@@ -152,13 +177,13 @@ def test_metadata_filter_narrows_search(svc):
 def test_metadata_filter_key_allowed(svc):
     # meta.* 필터 키는 allowlist를 통과해야 함(에러 없이 동작)
     _seed(svc)
-    svc.search_documents("x", filters={"meta.anything": "v"})  # ValueError 안 나면 통과
+    svc.search_documents("x", document_id="d1", filters={"meta.anything": "v"})  # ValueError 안 나면 통과
 
 
 def test_search_result_includes_has_code(svc):
     # has_code는 Chunk·payload에 있으니 검색 결과 source에도 노출돼야 함(스키마 일관성)
     _seed(svc)
-    results = svc.search_documents("201-01 한도", fiscal_year=2026)
+    results = svc.search_documents("201-01 한도", document_id="d1", fiscal_year=2026)
     top = next(r for r in results if r["chunk_id"] == "d1::c0")
     assert top["source"]["has_code"] is True
 
@@ -208,7 +233,7 @@ def test_index_embed_failure_preserves_existing(svc, monkeypatch):
     # 재색인 중 임베딩이 실패해도 기존 색인 데이터가 사라지면 안 됨(실패 안전성)
     svc.ingest_chunks("e1", [Chunk(chunk_id="e1::c0", document_id="e1",
                                    text="원본 데이터 보존 확인", fiscal_year=2026)])
-    assert svc.search_documents("원본 데이터 보존 확인"), "초기 색인 실패"
+    assert svc.search_documents("원본 데이터 보존 확인", document_id="e1"), "초기 색인 실패"
 
     def boom(texts):
         raise RuntimeError("embed 실패 주입")
@@ -218,12 +243,14 @@ def test_index_embed_failure_preserves_existing(svc, monkeypatch):
         svc.ingest_chunks("e1", [Chunk(chunk_id="e1::c1", document_id="e1",
                                        text="새 데이터", fiscal_year=2026)])
     # 핵심: 임베딩 실패로 기존 데이터가 유실되면 안 됨
-    assert svc.search_documents("원본 데이터 보존 확인"), "임베딩 실패로 기존 데이터 유실됨!"
+    assert svc.search_documents(
+        "원본 데이터 보존 확인", document_id="e1"
+    ), "임베딩 실패로 기존 데이터 유실됨!"
 
 
 def test_upsert_failure_preserves_existing_points(svc, monkeypatch):
     _seed(svc)
-    store = svc._indexer("kure").store
+    store = svc._indexer("kure", "d1").store
     monkeypatch.setattr(
         store,
         "upsert_chunks",
@@ -242,7 +269,7 @@ def test_upsert_failure_preserves_existing_points(svc, monkeypatch):
 
 def test_partial_upsert_failure_restores_pre_replacement_state(svc, monkeypatch):
     _seed(svc)
-    store = svc._indexer("kure").store
+    store = svc._indexer("kure", "d1").store
     old_ids = [point_id_for("d1::c0"), point_id_for("d1::c1")]
 
     def old_record_state():
@@ -366,7 +393,7 @@ def test_reindex_reparse_reparses_and_preserves_meta(svc, monkeypatch, tmp_path)
     monkeypatch.setattr("rag_mcp.pipeline.parse_and_chunk", fake_parse)
     res = svc.reindex_document("r1", reparse=True)
     assert res["ok"] is True and res["reparse"] is True
-    hits = svc.search_documents("새로 파싱된 본문")
+    hits = svc.search_documents("새로 파싱된 본문", document_id="r1")
     assert hits, "재파싱된 본문이 검색되지 않음"
     assert hits[0]["source"]["meta"]["부서"] == "예산과", "reparse 후 사용자 metadata 유실됨"
 
@@ -399,7 +426,8 @@ def test_collection_status_tool(svc):
     st = svc.collection_status()
     assert st["documents"] == 1
     assert st["by_fiscal_year"].get("2026") == 1
-    assert "kure" in st["collections"]
+    assert len(st["collections"]) == 1
+    assert next(iter(st["collections"])).startswith("rag_kure_d1_")
 
 
 def test_ingest_pdf_forces_fresh_parse(svc, monkeypatch, tmp_path):
@@ -436,14 +464,14 @@ def test_ingest_pdf_records_ocr_info_in_manifest_meta(svc, monkeypatch, tmp_path
     assert manifest is not None
     assert manifest.meta["부서"] == "예산과"
     assert manifest.meta["ocr"]["ocr_skipped"] == "pytesseract 미설치"
-    hit = svc.search_documents("OCR 본문")
+    hit = svc.search_documents("OCR 본문", document_id="ocrdoc")
     assert hit[0]["source"]["meta"]["ocr"]["ocr_skipped"] == "pytesseract 미설치"
 
 
 def test_search_rejects_non_scalar_filter_value(svc):
     _seed(svc)
     with pytest.raises(ValueError):
-        svc.search_documents("일반수용비", filters={"page": [9]})
+        svc.search_documents("일반수용비", document_id="d1", filters={"page": [9]})
 
 def test_ingest_pdf_missing_file(svc):
     res = svc.ingest_pdf("nonexistent.pdf")
@@ -466,8 +494,8 @@ def test_retriever_cache_is_thread_safe(svc, monkeypatch):
     created: list[str] = []
 
     class CountingStore:
-        def __init__(self, config, model):
-            created.append(model)
+        def __init__(self, config, model, document_id, client=None):
+            created.append((model, document_id))
             time.sleep(0.02)  # race 창 확대
 
         def status(self):
@@ -480,7 +508,7 @@ def test_retriever_cache_is_thread_safe(svc, monkeypatch):
 
     def worker():
         barrier.wait()  # 8개 스레드를 동시에 진입시켜 경쟁 유발
-        results.append(svc._retriever("kure"))
+        results.append(svc._retriever("kure", "d1"))
 
     threads = [threading.Thread(target=worker) for _ in range(8)]
     for t in threads:
@@ -488,7 +516,9 @@ def test_retriever_cache_is_thread_safe(svc, monkeypatch):
     for t in threads:
         t.join()
 
-    assert created.count("kure") == 1, f"VectorStore가 {created.count('kure')}번 생성됨(파일락 위험)"
+    assert created.count(("kure", "d1")) == 1, (
+        f"VectorStore가 {created.count(('kure', 'd1'))}번 생성됨(파일락 위험)"
+    )
     assert len({id(r) for r in results}) == 1, "스레드마다 다른 retriever 인스턴스를 받음"
 
 

@@ -1,6 +1,6 @@
 """Qdrant 벡터 저장소 (dense+sparse named vector, 하이브리드 검색). 스펙 §6.7, §6.8.
 
-  - 컬렉션은 임베딩 모델로 결정(저장·검색 일치 강제).
+  - 컬렉션은 임베딩 모델과 document_id로 결정(저장·검색 일치, 문서별 IDF 강제).
   - 한 청크 = 한 포인트에 named dense + named sparse 동시 upsert (orphan 없음).
   - 검색: prefetch(dense+sparse) + 각 Prefetch.filter + FusionQuery(RRF|DBSF).
     (local 모드 검증: top-level query_filter는 무효 → 필터는 각 Prefetch에 넣는다.)
@@ -13,7 +13,7 @@ import uuid
 
 from qdrant_client import QdrantClient, models
 
-from .config import Config
+from .config import Config, validate_document_id
 from .models import Chunk
 from .request_models import FilterValue
 from .sparse import to_sparse
@@ -34,39 +34,49 @@ def point_id_for(chunk_id: str) -> str:
     return str(uuid.uuid5(_NAMESPACE, chunk_id))
 
 
+def open_qdrant_client(config: Config) -> QdrantClient:
+    """설정에 맞는 Qdrant 클라이언트를 열고 local 파일락 오류를 한국어로 변환한다."""
+    if config.qdrant_mode == "server":
+        if not config.qdrant_url:
+            raise ValueError(
+                "RAG_QDRANT_MODE=server인데 RAG_QDRANT_URL이 비어 있습니다 "
+                "(조용히 local로 폴백하지 않음 — URL을 설정하거나 mode를 local로)."
+            )
+        return QdrantClient(url=config.qdrant_url)
+
+    config.qdrant_path.mkdir(parents=True, exist_ok=True)
+    try:
+        return QdrantClient(path=str(config.qdrant_path))
+    except RuntimeError as e:
+        if "already accessed" in str(e):
+            raise StorageBusyError(
+                f"Qdrant local 저장소({config.qdrant_path})가 다른 프로세스에서 사용 중입니다. "
+                "MCP serve가 실행 중이면 종료한 뒤 다시 시도하세요"
+                "(local path 모드는 동시 접근 불가 — 동시 사용이 필요하면 server 모드 사용)."
+            ) from e
+        raise
+
+
 class VectorStore:
-    def __init__(self, config: Config, embedding_model: str | None = None, client: QdrantClient | None = None):
+    def __init__(
+        self,
+        config: Config,
+        embedding_model: str | None = None,
+        document_id: str | None = None,
+        client: QdrantClient | None = None,
+    ):
         self.config = config
         self.embedding_model = embedding_model or config.embedding_model
-        self.collection = config.collection_name(self.embedding_model)
+        if document_id is None:
+            raise ValueError("VectorStore를 만들려면 document_id가 필요합니다")
+        self.document_id = validate_document_id(document_id)
+        self.collection = config.collection_name(self.embedding_model, self.document_id)
         self.dimension = config.dimension(self.embedding_model)
         # QdrantLocal은 thread-safe가 아니다. 비동기 ingest(백그라운드 스레드)의 upsert와
         # 검색 요청이 같은 클라이언트를 동시 접근하면 손상될 수 있어 접근을 직렬화한다.
         # RLock인 이유: upsert_chunks가 내부에서 ensure_collection을 호출(같은 스레드 재진입).
         self._lock = threading.RLock()
-        if client is not None:
-            self.client = client
-        elif config.qdrant_mode == "server":
-            if not config.qdrant_url:
-                raise ValueError(
-                    "RAG_QDRANT_MODE=server인데 RAG_QDRANT_URL이 비어 있습니다 "
-                    "(조용히 local로 폴백하지 않음 — URL을 설정하거나 mode를 local로)."
-                )
-            self.client = QdrantClient(url=config.qdrant_url)
-        else:
-            config.qdrant_path.mkdir(parents=True, exist_ok=True)
-            try:
-                self.client = QdrantClient(path=str(config.qdrant_path))
-            except RuntimeError as e:
-                # Qdrant local은 단일 프로세스만 저장소를 열 수 있다(스펙 §1.3 파일락).
-                # serve(MCP)가 떠 있는 동안 CLI ingest 등을 동시 실행하면 여기서 막힌다.
-                if "already accessed" in str(e):
-                    raise StorageBusyError(
-                        f"Qdrant local 저장소({config.qdrant_path})가 다른 프로세스에서 사용 중입니다. "
-                        "MCP serve가 실행 중이면 종료한 뒤 다시 시도하세요"
-                        "(local path 모드는 동시 접근 불가 — 동시 사용이 필요하면 server 모드 사용)."
-                    ) from e
-                raise
+        self.client = client or open_qdrant_client(config)
 
     # --- 컬렉션 ---
     def ensure_collection(self) -> None:
@@ -100,6 +110,12 @@ class VectorStore:
     def upsert_chunks(self, chunks: list[Chunk], dense_vectors: list[list[float]]) -> int:
         if len(chunks) != len(dense_vectors):
             raise ValueError("chunks와 dense_vectors 길이 불일치")
+        mismatched = [chunk.document_id for chunk in chunks if chunk.document_id != self.document_id]
+        if mismatched:
+            raise ValueError(
+                f"컬렉션 document_id({self.document_id})와 다른 청크가 포함되었습니다: "
+                f"{sorted(set(mismatched))}"
+            )
         points = []
         for chunk, dvec in zip(chunks, dense_vectors):
             idx, val = to_sparse(chunk.text)
@@ -343,6 +359,7 @@ class VectorStore:
             info = self.client.get_collection(self.collection)
         return {
             "collection": self.collection,
+            "document_id": self.document_id,
             "exists": True,
             "dimension": self.dimension,
             "points": info.points_count,

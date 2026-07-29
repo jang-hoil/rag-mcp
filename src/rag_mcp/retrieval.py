@@ -42,13 +42,17 @@ class Retriever:
         self,
         config: Config,
         embedding_model: str = "kure",
+        document_id: str | None = None,
         backend: EmbeddingBackend | None = None,
         store: VectorStore | None = None,
     ):
         self.config = config
         self.embedding_model = embedding_model
+        if document_id is None:
+            raise ValueError("Retriever를 만들려면 document_id가 필요합니다")
+        self.document_id = document_id
         self._backend = backend  # lazy: 실제 호출 시 로딩
-        self.store = store or VectorStore(config, embedding_model)
+        self.store = store or VectorStore(config, embedding_model, document_id)
 
     @property
     def backend(self) -> EmbeddingBackend:

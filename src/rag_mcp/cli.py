@@ -33,6 +33,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p_search = sub.add_parser("search", help="검색")
     p_search.add_argument("query")
+    p_search.add_argument("--document-id", required=True)
     p_search.add_argument("--top-k", type=int, default=8)
     p_search.add_argument("--mode", default="hybrid", choices=["hybrid", "dense", "sparse"])
     p_search.add_argument("--fusion", default="rrf", choices=["rrf", "dbsf"])
@@ -45,6 +46,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p_eval = sub.add_parser("eval", help="검색 품질 평가(읽기 전용 골든셋 채점)")
     p_eval.add_argument("goldset", help="JSONL 골든셋 경로 (예: eval/goldset.jsonl)")
+    p_eval.add_argument("--document-id", required=True)
     p_eval.add_argument("--fetch-k", type=int, default=50)
     p_eval.add_argument("--embedding-model", default=None)
     p_eval.add_argument("--json", action="store_true", help="요약을 JSON으로 출력")
@@ -61,7 +63,12 @@ def main(argv: list[str] | None = None) -> int:
     # eval은 read-only 평가 — 자체적으로 RagService를 구성하므로 여기서 일찍 처리
     if args.cmd == "eval":
         from .evaluation import format_report, run
-        summary = run(args.goldset, fetch_k=args.fetch_k, embedding_model=args.embedding_model)
+        summary = run(
+            args.goldset,
+            fetch_k=args.fetch_k,
+            embedding_model=args.embedding_model,
+            document_id=args.document_id,
+        )
         if args.json:
             _print(summary)
         else:
@@ -84,7 +91,8 @@ def main(argv: list[str] | None = None) -> int:
         ))
     elif args.cmd == "search":
         _print(svc.search_documents(
-            args.query, top_k=args.top_k, search_mode=args.mode, fusion=args.fusion,
+            args.query, document_id=args.document_id, top_k=args.top_k,
+            search_mode=args.mode, fusion=args.fusion,
             fiscal_year=args.fiscal_year, embedding_model=args.embedding_model,
         ))
     elif args.cmd == "status":

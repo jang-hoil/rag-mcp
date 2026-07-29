@@ -71,7 +71,7 @@ def test_active_ingest_rejects_delete_and_reindex_but_allows_search(
         assert reindex_result.get("status") == "busy"
         assert delete_result["operation"] == "ingest_pdf"
         assert delete_result["job_id"] == submitted["job_id"]
-        assert svc.search_documents("general operating expense")
+        assert svc.search_documents("general operating expense", document_id="d1")
         assert svc.manifests.read("d1") is not None
         assert svc.ingest_status(submitted["job_id"])["status"] == "running"
     finally:

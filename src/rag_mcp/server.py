@@ -36,13 +36,14 @@ async def _run(fn, *args, **kwargs):
 
 @mcp.tool()
 async def search_documents(
-    query: str, top_k: int = 8, search_mode: str = "hybrid", embedding_model: str | None = None,
+    query: str, document_id: str | None = None, top_k: int = 8,
+    search_mode: str = "hybrid", embedding_model: str | None = None,
     fusion: str = "rrf", fiscal_year: int | None = None, filters: dict[str, JsonValue] | None = None,
 ) -> list[dict]:
-    """회계·예산 지침서 하이브리드 검색. embedding_model이 컬렉션 결정.
+    """특정 회계·예산 지침서의 하이브리드 검색. document_id는 필수.
     fiscal_year로 해당 연도만 검색. 결과가 needs_image면 page_image 경로 포함."""
     return await _run(
-        service().search_documents, query, top_k=top_k, search_mode=search_mode,
+        service().search_documents, query, document_id=document_id, top_k=top_k, search_mode=search_mode,
         embedding_model=embedding_model, fusion=fusion, fiscal_year=fiscal_year, filters=filters,
     )
 
