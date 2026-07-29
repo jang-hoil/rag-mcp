@@ -221,11 +221,13 @@ def test_get_chunk_tool(svc):
 
 def test_delete_requires_confirm(svc):
     _seed(svc)
+    collection = svc._retriever("kure", "d1").store.collection
     guarded = svc.delete_document("d1", confirm=False)
     assert guarded["ok"] is False
     assert svc.list_documents()  # 아직 존재
     done = svc.delete_document("d1", confirm=True)
     assert done["ok"] is True
+    assert not svc._client().collection_exists(collection)
     assert svc.list_documents() == []
 
 

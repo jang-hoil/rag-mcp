@@ -437,7 +437,7 @@ list_documents로 색인된 문서를 보여줘.
 | 재색인 | "이 문서 reindex_document로 다시 색인해줘" | `reindex_document` |
 
 > 큰 PDF 색인은 **2단계**입니다. `ingest_pdf`가 즉시 `job_id`만 돌려주고, 실제 색인은 백그라운드에서 진행됩니다. 그래서 "색인 시작 → job_id로 진행 확인"으로 나눠 말하게 됩니다.
-> 삭제는 실수 방지를 위해 **`confirm=True`**를 함께 말해야 실제로 실행됩니다.
+> 삭제는 실수 방지를 위해 **`confirm=True`**를 함께 말해야 실제로 실행되며, 해당 문서의 Qdrant 컬렉션 전체를 제거합니다.
 
 ## OCR 동작 방식
 

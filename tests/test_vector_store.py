@@ -75,8 +75,10 @@ def test_sparse_only_exact_code(store, fake_backend):
 
 def test_reindex_idempotent_no_duplicates(store, fake_backend):
     chunks, _ = _seed(store, fake_backend)
-    # 같은 문서 재색인: 삭제 후 재삽입 → 중복 없음
+    # 문서 삭제는 전용 컬렉션 자체를 제거한다.
     store.delete_document("doc1")
+    assert not store.client.collection_exists(store.collection)
+    # 같은 문서 재색인 시 컬렉션을 다시 만들며 중복이 없다.
     doc1_chunks = [c for c in chunks if c.document_id == "doc1"]
     vecs = fake_backend.embed_documents([c.text for c in doc1_chunks])
     store.upsert_chunks(doc1_chunks, vecs)

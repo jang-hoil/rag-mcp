@@ -136,16 +136,15 @@ class VectorStore:
         return len(points)
 
     def delete_document(self, document_id: str) -> None:
-        """문서의 모든 포인트 삭제 (멱등 재색인용)."""
+        """문서 전용 컬렉션을 삭제한다(멱등)."""
+        if document_id != self.document_id:
+            raise ValueError(
+                f"VectorStore document_id({self.document_id})와 삭제 요청({document_id})이 다릅니다"
+            )
         with self._lock:
             if not self.client.collection_exists(self.collection):
                 return
-            self.client.delete(
-                collection_name=self.collection,
-                points_selector=models.Filter(
-                    must=[models.FieldCondition(key="document_id", match=models.MatchValue(value=document_id))]
-                ),
-            )
+            self.client.delete_collection(collection_name=self.collection)
 
     def point_ids_by_document(self, document_id: str) -> set[str | int]:
         with self._lock:
