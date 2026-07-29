@@ -64,6 +64,7 @@ class VectorStore:
         embedding_model: str | None = None,
         document_id: str | None = None,
         client: QdrantClient | None = None,
+        lock: threading.RLock | None = None,
     ):
         self.config = config
         self.embedding_model = embedding_model or config.embedding_model
@@ -72,10 +73,10 @@ class VectorStore:
         self.document_id = validate_document_id(document_id)
         self.collection = config.collection_name(self.embedding_model, self.document_id)
         self.dimension = config.dimension(self.embedding_model)
-        # QdrantLocal은 thread-safe가 아니다. 비동기 ingest(백그라운드 스레드)의 upsert와
-        # 검색 요청이 같은 클라이언트를 동시 접근하면 손상될 수 있어 접근을 직렬화한다.
+        # QdrantLocal은 thread-safe가 아니다. 같은 클라이언트를 공유하는 문서별 저장소는
+        # 서비스가 주입한 하나의 락으로 비동기 upsert와 검색 등 모든 접근을 직렬화한다.
         # RLock인 이유: upsert_chunks가 내부에서 ensure_collection을 호출(같은 스레드 재진입).
-        self._lock = threading.RLock()
+        self._lock = lock if lock is not None else threading.RLock()
         self.client = client or open_qdrant_client(config)
 
     # --- 컬렉션 ---

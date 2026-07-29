@@ -61,6 +61,9 @@ class RagService:
         # 같은 모델의 VectorStore(Qdrant local client)를 동시에 두 개 열어 파일락이 충돌하는 것을 막는다.
         # _indexer가 락을 쥔 채 _retriever를 재호출하므로 재진입 가능한 RLock을 쓴다.
         self._resource_lock = threading.RLock()
+        # QdrantLocal은 thread-safe가 아니므로 같은 클라이언트를 공유하는 모든 문서별
+        # VectorStore와 서비스의 직접 client 호출을 하나의 RLock으로 직렬화한다.
+        self._qdrant_lock = threading.RLock()
 
     def _embedding_backend(self, model: str) -> EmbeddingBackend:
         if self._backend is not None:
@@ -85,6 +88,7 @@ class RagService:
                     model,
                     document_id,
                     client=self._client(),
+                    lock=self._qdrant_lock,
                 )
                 self._retrievers[key] = Retriever(
                     self.config,
@@ -220,49 +224,50 @@ class RagService:
             for m in manifests
         }
         client = self._client()
-        for collection in client.get_collections().collections:
-            name = collection.name
-            m = manifest_by_collection.get(name)
-            if m is not None:
+        with self._qdrant_lock:
+            for collection in client.get_collections().collections:
+                name = collection.name
+                m = manifest_by_collection.get(name)
+                if m is not None:
+                    out.append({
+                        "document_id": m.document_id,
+                        "doc_name": m.doc_name,
+                        "fiscal_year": m.fiscal_year,
+                        "num_chunks": self._retriever(m.embedding_model, m.document_id).store.count_by_document(m.document_id),
+                        "status": m.status,
+                        "embedding_model": m.embedding_model,
+                        "collection": name,
+                    })
+                    continue
+
+                model = next(
+                    (candidate for candidate in COLLECTION_BY_MODEL if name.startswith(f"rag_{candidate}_")),
+                    None,
+                )
+                if model is None:
+                    continue
+                points, _ = client.scroll(
+                    collection_name=name,
+                    limit=1,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                if not points:
+                    continue
+                payload = points[0].payload or {}
+                document_id = payload.get("document_id")
+                if not document_id:
+                    continue
+                info = client.get_collection(name)
                 out.append({
-                    "document_id": m.document_id,
-                    "doc_name": m.doc_name,
-                    "fiscal_year": m.fiscal_year,
-                    "num_chunks": self._retriever(m.embedding_model, m.document_id).store.count_by_document(m.document_id),
-                    "status": m.status,
-                    "embedding_model": m.embedding_model,
+                    "document_id": document_id,
+                    "doc_name": payload.get("doc_name"),
+                    "fiscal_year": payload.get("fiscal_year"),
+                    "num_chunks": info.points_count or 0,
+                    "status": "done",
+                    "embedding_model": model,
                     "collection": name,
                 })
-                continue
-
-            model = next(
-                (candidate for candidate in COLLECTION_BY_MODEL if name.startswith(f"rag_{candidate}_")),
-                None,
-            )
-            if model is None:
-                continue
-            points, _ = client.scroll(
-                collection_name=name,
-                limit=1,
-                with_payload=True,
-                with_vectors=False,
-            )
-            if not points:
-                continue
-            payload = points[0].payload or {}
-            document_id = payload.get("document_id")
-            if not document_id:
-                continue
-            info = client.get_collection(name)
-            out.append({
-                "document_id": document_id,
-                "doc_name": payload.get("doc_name"),
-                "fiscal_year": payload.get("fiscal_year"),
-                "num_chunks": info.points_count or 0,
-                "status": "done",
-                "embedding_model": model,
-                "collection": name,
-            })
         out.sort(key=lambda item: item["document_id"])
         return out
 
@@ -319,23 +324,24 @@ class RagService:
         return self._indexer(m.embedding_model, document_id).reindex_document(document_id, reparse=reparse)
 
     def collection_status(self) -> dict:
-        docs = self.list_documents()
-        by_year: dict[str, int] = {}
-        for d in docs:
-            key = str(d.get("fiscal_year"))
-            by_year[key] = by_year.get(key, 0) + 1
-        # 실제 문서별 컬렉션 상태
-        collections = {}
-        for d in docs:
-            model = d.get("embedding_model", self.config.embedding_model)
-            document_id = d["document_id"]
-            status = self._retriever(model, document_id).store.status()
-            collections[status["collection"]] = status
-        return {
-            "documents": len(docs),
-            "by_fiscal_year": by_year,
-            "collections": collections,
-        }
+        with self._qdrant_lock:
+            docs = self.list_documents()
+            by_year: dict[str, int] = {}
+            for d in docs:
+                key = str(d.get("fiscal_year"))
+                by_year[key] = by_year.get(key, 0) + 1
+            # 실제 문서별 컬렉션 상태
+            collections = {}
+            for d in docs:
+                model = d.get("embedding_model", self.config.embedding_model)
+                document_id = d["document_id"]
+                status = self._retriever(model, document_id).store.status()
+                collections[status["collection"]] = status
+            return {
+                "documents": len(docs),
+                "by_fiscal_year": by_year,
+                "collections": collections,
+            }
 
     def ingest_chunks(
         self, document_id: str, chunks: list[Chunk], doc_name: str | None = None,

@@ -98,6 +98,67 @@ def test_each_document_uses_its_own_collection(svc):
     assert d2_store.count_by_document("d2") == 1
 
 
+def test_cross_document_search_and_ingest_serialize_client_access(svc, monkeypatch):
+    """문서 A 검색과 문서 B 색인이 같은 QdrantLocal 클라이언트를 동시에 호출하지 않는다."""
+    import threading
+
+    _seed(svc)
+    client = svc._client()
+    original_query_points = client.query_points
+    original_upsert = client.upsert
+    search_entered = threading.Event()
+    release_search = threading.Event()
+    writer_started = threading.Event()
+    upsert_entered = threading.Event()
+    errors = []
+
+    def blocking_query_points(*args, **kwargs):
+        search_entered.set()
+        if not release_search.wait(5):
+            raise TimeoutError("검색 호출 해제 대기 시간 초과")
+        return original_query_points(*args, **kwargs)
+
+    def observed_upsert(*args, **kwargs):
+        upsert_entered.set()
+        return original_upsert(*args, **kwargs)
+
+    def search_document_a():
+        try:
+            svc.search_documents("일반수용비", document_id="d1")
+        except Exception as exc:  # pragma: no cover - 실패 시 assertion에 원인 표시
+            errors.append(exc)
+
+    def ingest_document_b():
+        writer_started.set()
+        try:
+            svc.ingest_chunks(
+                "d2",
+                [Chunk(chunk_id="d2::c0", document_id="d2", text="동시 색인 문서")],
+            )
+        except Exception as exc:  # pragma: no cover - 실패 시 assertion에 원인 표시
+            errors.append(exc)
+
+    monkeypatch.setattr(client, "query_points", blocking_query_points)
+    monkeypatch.setattr(client, "upsert", observed_upsert)
+    reader = threading.Thread(target=search_document_a)
+    writer = threading.Thread(target=ingest_document_b)
+
+    reader.start()
+    assert search_entered.wait(5)
+    writer.start()
+    assert writer_started.wait(5)
+    concurrent_upsert = upsert_entered.wait(0.5)
+    release_search.set()
+    reader.join(5)
+    writer.join(5)
+
+    assert not reader.is_alive()
+    assert not writer.is_alive()
+    assert not errors, errors
+    assert not concurrent_upsert, "문서 B upsert가 문서 A query와 동시에 클라이언트에 진입함"
+    assert upsert_entered.is_set()
+
+
 def test_list_documents_ignores_manifest_without_collection(svc):
     svc.manifests.update("manifest-only", status="done", num_chunks=3)
     assert svc.list_documents() == []
@@ -496,7 +557,7 @@ def test_retriever_cache_is_thread_safe(svc, monkeypatch):
     created: list[str] = []
 
     class CountingStore:
-        def __init__(self, config, model, document_id, client=None):
+        def __init__(self, config, model, document_id, client=None, lock=None):
             created.append((model, document_id))
             time.sleep(0.02)  # race 창 확대
 
