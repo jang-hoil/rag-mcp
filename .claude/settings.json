@@ -13,6 +13,19 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "changed=$(git diff --name-only HEAD -- README.md src/rag_mcp); last=$(git diff-tree --no-commit-id --name-only -r HEAD -- README.md src/rag_mcp); if { printf '%s\\n' \"$changed\" | grep -q '^src/rag_mcp/.*[.]py$'; } && ! { printf '%s\\n' \"$changed\" | grep -q '^README[.]md$'; }; then jq -n '{decision:\"block\",reason:\"src/rag_mcp Python 소스를 수정했지만 README.md를 함께 갱신하지 않았습니다. README 영향을 반영한 뒤 다시 종료하세요.\"}'; elif { printf '%s\\n' \"$last\" | grep -q '^src/rag_mcp/.*[.]py$'; } && ! { printf '%s\\n' \"$last\" | grep -q '^README[.]md$'; }; then jq -n '{decision:\"block\",reason:\"최근 커밋에 src/rag_mcp Python 변경이 있지만 README.md 변경이 없습니다. README를 보완 커밋한 뒤 다시 종료하세요.\"}'; fi",
+            "shell": "bash",
+            "timeout": 10,
+            "statusMessage": "README 동반 변경 확인 중"
+          }
+        ]
+      }
     ]
   }
 }
