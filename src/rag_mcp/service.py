@@ -28,6 +28,8 @@ _MAX_TOP_K = 100
 _ALLOWED_FILTER_KEYS = frozenset(
     {"fiscal_year", "document_id", "doc_name", "is_table", "has_amount", "has_code", "needs_image", "page"}
 )
+# 이관 전 모델별 단일 컬렉션은 문서별 컬렉션 fallback 대상이 아니다.
+_LEGACY_COLLECTIONS = frozenset(COLLECTION_BY_MODEL.values())
 
 # 파일명에서만 4자리 연도를 자명하게 추출(PDF 내용은 열지 않음). review_before_ingest 전용.
 _FILENAME_YEAR_RE = re.compile(r"(?:19|20)\d{2}")
@@ -227,6 +229,8 @@ class RagService:
         with self._qdrant_lock:
             for collection in client.get_collections().collections:
                 name = collection.name
+                if name in _LEGACY_COLLECTIONS:
+                    continue
                 m = manifest_by_collection.get(name)
                 if m is not None:
                     out.append({
@@ -304,7 +308,20 @@ class RagService:
         if not confirm:
             return {"ok": False, "error": "confirm=True 필요(안전 가드)", "document_id": document_id}
         m = self.manifests.read(document_id)
-        model = m.embedding_model if m else self.config.embedding_model
+        if m is not None:
+            model = m.embedding_model
+        else:
+            indexed = next(
+                (doc for doc in self.list_documents() if doc["document_id"] == document_id),
+                None,
+            )
+            if indexed is None:
+                return {
+                    "ok": False,
+                    "error": f"문서 없음: {document_id}",
+                    "document_id": document_id,
+                }
+            model = indexed["embedding_model"]
         return self._indexer(model, document_id).delete_document(document_id)
 
     def reindex_document(self, document_id: str, reparse: bool = False) -> dict:

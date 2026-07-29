@@ -30,6 +30,35 @@ def _seed(svc):
     return svc.ingest_chunks("d1", chunks, doc_name="2026 예산기준", fiscal_year=2026)
 
 
+def _seed_legacy_collection(svc, document_id="legacy-ghost"):
+    """이관 전 단일 컬렉션에 여러 문서 중 한 포인트가 있는 상태를 만든다."""
+    from qdrant_client import models
+
+    from rag_mcp.config import COLLECTION_BY_MODEL
+
+    collection = COLLECTION_BY_MODEL["kure"]
+    client = svc._client()
+    client.create_collection(
+        collection_name=collection,
+        vectors_config=models.VectorParams(size=1, distance=models.Distance.COSINE),
+    )
+    client.upsert(
+        collection_name=collection,
+        points=[
+            models.PointStruct(
+                id=1,
+                vector=[1.0],
+                payload={
+                    "document_id": document_id,
+                    "doc_name": "레거시 단일 컬렉션",
+                    "fiscal_year": 2026,
+                },
+            )
+        ],
+    )
+    return collection
+
+
 def test_ingest_and_list_documents(svc):
     res = _seed(svc)
     assert res["ok"] and res["num_chunks"] == 2 and res["status"] == "done"
@@ -162,6 +191,26 @@ def test_cross_document_search_and_ingest_serialize_client_access(svc, monkeypat
 def test_list_documents_ignores_manifest_without_collection(svc):
     svc.manifests.update("manifest-only", status="done", num_chunks=3)
     assert svc.list_documents() == []
+
+
+def test_legacy_single_collection_is_hidden_from_list_and_status(svc):
+    legacy_collection = _seed_legacy_collection(svc)
+
+    assert svc.list_documents() == []
+    status = svc.collection_status()
+    assert status["documents"] == 0
+    assert status["collections"] == {}
+    assert legacy_collection not in status["collections"]
+
+
+def test_delete_unknown_legacy_payload_document_reports_not_found(svc):
+    legacy_collection = _seed_legacy_collection(svc)
+
+    result = svc.delete_document("legacy-ghost", confirm=True)
+
+    assert result["ok"] is False
+    assert "문서 없음" in result["error"]
+    assert svc._client().collection_exists(legacy_collection)
 
 
 def test_warmup_loads_backend(svc):

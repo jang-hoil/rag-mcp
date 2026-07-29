@@ -518,6 +518,12 @@ uv run python scripts/migrate_to_per_doc_collections.py
 
 # 3. dry-run의 669/370/38청크 확인 뒤에만 실제 복사
 uv run python scripts/migrate_to_per_doc_collections.py --apply
+
+# 4. MCP 서버를 다시 켜 list_documents와 collection_status에서
+#    세 문서와 669/370/38청크를 확인한 뒤 서버를 다시 완전히 종료
+
+# 5. 검증이 끝난 경우에만 레거시 단일 컬렉션 제거
+uv run python -c "from rag_mcp.config import COLLECTION_BY_MODEL, Config; from rag_mcp.vector_store import open_qdrant_client; c=open_qdrant_client(Config()); name=COLLECTION_BY_MODEL['kure']; assert c.collection_exists(name), '레거시 컬렉션이 없습니다'; c.delete_collection(name); c.close()"
 ```
 
 이관 대상은 `2026년 공직윤리 실무과정`,
@@ -525,6 +531,8 @@ uv run python scripts/migrate_to_per_doc_collections.py --apply
 `2025년_공직실무_재산등록(온라인용)`입니다.
 삭제 확정된 `2025년_공직실무_윤리업무(온라인용)`과
 `칠곡군청_2026 통합회계실무교재`는 새 컬렉션으로 복사하지 않습니다.
+`rag_kure_chunks`는 이관 검증 전 복구용 원본이므로 먼저 지우지 마세요. 검증 뒤에도
+남겨 두면 목록에는 표시되지 않지만 저장 공간을 계속 사용하므로 위 5단계로 정리합니다.
 
 ### 프로젝트 전체 구조 (참고)
 
