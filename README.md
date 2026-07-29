@@ -505,6 +505,27 @@ Claude Desktop에 MCP로 연결해 쓰는 동안에는 다른 터미널에서 `u
 
 또한 Claude Desktop이 서버를 켜 둔 동안에는 실행파일(`rag-mcp.exe`)이 잠겨 있어 다른 터미널의 `uv run ...`(예: `uv run pytest`)이 *파일이 사용 중* 오류로 실패할 수 있습니다. 이때는 Claude Desktop을 잠시 종료하거나, 가상환경 파이썬으로 직접 실행하세요: `./.venv/Scripts/python.exe -m pytest -q`.
 
+### 기존 단일 컬렉션 이관
+
+`scripts/migrate_to_per_doc_collections.py`는 기존 `rag_kure_chunks`의 dense/sparse
+벡터와 payload를 그대로 읽어 문서별 컬렉션에 복사합니다. KURE 재임베딩은 하지
+않으며 기본값은 쓰기 없는 dry-run입니다.
+
+```powershell
+# 1. Claude Desktop/MCP 서버를 완전히 종료하고 data/qdrant를 별도 백업
+# 2. 청크 수만 검증(쓰기 없음)
+uv run python scripts/migrate_to_per_doc_collections.py
+
+# 3. dry-run의 669/370/38청크 확인 뒤에만 실제 복사
+uv run python scripts/migrate_to_per_doc_collections.py --apply
+```
+
+이관 대상은 `2026년 공직윤리 실무과정`,
+`pas_public_audit_info_system_manual_v1_01_2023`,
+`2025년_공직실무_재산등록(온라인용)`입니다.
+삭제 확정된 `2025년_공직실무_윤리업무(온라인용)`과
+`칠곡군청_2026 통합회계실무교재`는 새 컬렉션으로 복사하지 않습니다.
+
 ### 프로젝트 전체 구조 (참고)
 
 소스코드(◆ git 포함)와 색인 시 생성되는 산출물(✦ git 제외)이 한 폴더 안에 함께 있습니다. 다른 사람이 `git clone`하면 **◆만** 받고, ✦는 본인 PC에서 새로 생성됩니다(그래서 색인 데이터는 복제되지 않습니다).
