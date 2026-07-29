@@ -28,6 +28,21 @@
 
 > **전 마일스톤 완료. 실제 KURE로 end-to-end 검색까지 확인. 62 passed, 1 skipped.**
 
+## 현재 상태 (CURRENT STATE) — 2026-07-29
+- `codex/rag-mcp-safety-hardening` 11커밋을 master에 충돌 없이 머지했다.
+- Qdrant 컬렉션을 `rag_<model>_<정규화 document_id>_<blake2b 6자리>` 형식으로
+  문서별 분리했다. `search_documents`는 `document_id`가 필수이며, 누락 시 사용 가능한
+  ID 목록을 한국어 오류에 포함한다.
+- `list_documents`와 `collection_status`는 실제 컬렉션 목록을 기준으로 동작하고,
+  `delete_document(confirm=True)`는 해당 문서 컬렉션 전체를 삭제한다.
+- `.claude/settings.json` Stop 훅이 `src/rag_mcp/*.py` 변경에 README.md가 빠진 경우
+  종료를 차단한다.
+- `scripts/migrate_to_per_doc_collections.py` 작성 완료. 기본 dry-run이고 `--apply`에서만
+  기존 dense/sparse 벡터를 그대로 복사한다. **스크립트는 아직 실행하지 않았다.**
+- 전체 테스트: **152 passed, 8 skipped**.
+- 다음 작업: 사용자가 Claude Desktop/MCP 서버를 종료한 뒤 `data/qdrant`를 백업하고,
+  마이그레이션 스크립트를 dry-run으로 실행해 669/370/38청크를 확인한 다음 `--apply`.
+
 ## 현재 상태 (CURRENT STATE) — 2026-06-24
 - **end-to-end 완성 확인.** 실제 KURE-v1로 `예산편성_예산부서.pdf`(180 청크) 재색인 →
   `uv run rag-mcp search "일상경비 한도"` 정상 결과(dense+sparse RRF, heading_path/page 메타 정상).
