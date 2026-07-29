@@ -201,7 +201,21 @@ class RagService:
         parsed_filters = SearchFilters.from_raw(filters)
         parsed_filters.ensure_allowed(_ALLOWED_FILTER_KEYS)
         model = embedding_model or self.config.embedding_model
-        results = self._retriever(model, document_id).search(
+        retriever = self._retriever(model, document_id)
+        if not retriever.store.collection_exists():
+            manifest = self.manifests.read(document_id)
+            if manifest is None:
+                raise ValueError(
+                    f"문서 '{document_id}'는 매니페스트와 문서별 컬렉션이 모두 없습니다. "
+                    "document_id를 확인하거나 새 문서는 ingest_pdf로 색인하세요. "
+                    "기존 단일 컬렉션 문서라면 "
+                    "scripts/migrate_to_per_doc_collections.py로 이관하세요."
+                )
+            raise ValueError(
+                f"문서 '{document_id}'는 매니페스트는 있지만 문서별 Qdrant 컬렉션이 아직 없습니다. "
+                "scripts/migrate_to_per_doc_collections.py로 이관하거나 문서를 다시 색인하세요."
+            )
+        results = retriever.search(
             query, top_k=top_k, search_mode=search_mode, fusion=fusion,
             fiscal_year=fiscal_year, filters=parsed_filters.to_qdrant(),
         )

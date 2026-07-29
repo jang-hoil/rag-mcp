@@ -73,6 +73,19 @@ def test_sparse_only_exact_code(store, fake_backend):
     assert "doc1::c0" in ids
 
 
+def test_query_missing_document_collection_requires_migration(store):
+    with pytest.raises(
+        ValueError,
+        match=r"문서별 Qdrant 컬렉션이 아직 없습니다.*migrate_to_per_doc_collections\.py",
+    ):
+        store.query(
+            [0.0] * store.dimension,
+            None,
+            top_k=1,
+            search_mode="dense",
+        )
+
+
 def test_reindex_idempotent_no_duplicates(store, fake_backend):
     chunks, _ = _seed(store, fake_backend)
     # 문서 삭제는 전용 컬렉션 자체를 제거한다.

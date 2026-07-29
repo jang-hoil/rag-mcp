@@ -107,6 +107,50 @@ def test_search_documents_tool(svc):
     assert top["source"]["page_image"].endswith("p9.png")
 
 
+def test_search_unknown_document_fails_before_dense_embedding(svc, monkeypatch):
+    embedded_queries = []
+    original_embed_query = svc._backend.embed_query
+
+    def observed_embed_query(text):
+        embedded_queries.append(text)
+        return original_embed_query(text)
+
+    monkeypatch.setattr(svc._backend, "embed_query", observed_embed_query)
+
+    with pytest.raises(
+        ValueError,
+        match=r"매니페스트와 문서별 컬렉션이 모두 없습니다.*migrate_to_per_doc_collections\.py",
+    ):
+        svc.search_documents("일반수용비", document_id="unknown-document")
+
+    assert embedded_queries == []
+
+
+def test_search_manifest_without_collection_requires_migration_before_embedding(svc, monkeypatch):
+    svc.manifests.update(
+        "manifest-only",
+        status="done",
+        embedding_model="kure",
+        num_chunks=3,
+    )
+    embedded_queries = []
+    original_embed_query = svc._backend.embed_query
+
+    def observed_embed_query(text):
+        embedded_queries.append(text)
+        return original_embed_query(text)
+
+    monkeypatch.setattr(svc._backend, "embed_query", observed_embed_query)
+
+    with pytest.raises(
+        ValueError,
+        match=r"매니페스트는 있지만 문서별 Qdrant 컬렉션이 아직 없습니다.*migrate_to_per_doc_collections\.py",
+    ):
+        svc.search_documents("일반수용비", document_id="manifest-only")
+
+    assert embedded_queries == []
+
+
 def test_search_requires_document_id_and_lists_available_documents(svc):
     _seed(svc)
     with pytest.raises(ValueError, match=r"document_id가 필요합니다.*d1"):

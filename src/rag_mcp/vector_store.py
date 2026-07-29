@@ -84,6 +84,23 @@ class VectorStore:
         with self._lock:
             self._ensure_collection_locked()
 
+    def collection_exists(self) -> bool:
+        """이 문서의 전용 컬렉션 존재 여부를 공유 클라이언트 락 안에서 확인한다."""
+        with self._lock:
+            return self.client.collection_exists(self.collection)
+
+    def require_collection(self) -> None:
+        """검색 전에 문서별 컬렉션이 없으면 이관 방법을 포함한 오류를 낸다."""
+        with self._lock:
+            self._require_collection_locked()
+
+    def _require_collection_locked(self) -> None:
+        if not self.client.collection_exists(self.collection):
+            raise ValueError(
+                f"문서 '{self.document_id}'의 문서별 Qdrant 컬렉션이 아직 없습니다. "
+                "scripts/migrate_to_per_doc_collections.py로 문서별 컬렉션을 이관하세요."
+            )
+
     def _ensure_collection_locked(self) -> None:
         if self.client.collection_exists(self.collection):
             return
@@ -300,8 +317,7 @@ class VectorStore:
             else None
         )
         with self._lock:
-            if not self.client.collection_exists(self.collection):
-                return []
+            self._require_collection_locked()
             if search_mode == "dense":
                 return self.client.query_points(
                     self.collection, query=dense_vec, using="dense",

@@ -69,6 +69,8 @@ class Retriever:
         fiscal_year: int | None = None,
         filters: Mapping[str, FilterValue] | None = None,
     ) -> list[SearchResult]:
+        # 컬렉션이 없는 미이관 문서는 KURE 연산 전에 명확히 실패시킨다.
+        self.store.require_collection()
         dense_vec = None
         sparse_vec = None
         if search_mode in ("dense", "hybrid"):
