@@ -28,3 +28,4 @@ tests/fixtures/sample_parsed.json
 
 # Codex/Superpowers 격리 작업공간
 .worktrees/
+.superpowers/

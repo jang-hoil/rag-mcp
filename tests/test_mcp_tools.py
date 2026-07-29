@@ -6,6 +6,7 @@ import pytest
 from rag_mcp.config import Config
 from rag_mcp.models import Chunk
 from rag_mcp.service import RagService
+from rag_mcp.vector_store import point_id_for
 
 
 @pytest.fixture
@@ -36,6 +37,35 @@ def test_ingest_and_list_documents(svc):
     assert len(docs) == 1
     assert docs[0]["document_id"] == "d1"
     assert docs[0]["fiscal_year"] == 2026
+
+
+def test_service_shares_backend_per_model(tmp_path, monkeypatch, fake_backend):
+    created = []
+
+    def factory(model):
+        created.append(model)
+        return fake_backend
+
+    monkeypatch.setattr("rag_mcp.service.get_backend", factory)
+    cfg = Config(data_dir=tmp_path, qdrant_path=tmp_path / "qdrant")
+    svc = RagService(cfg)
+    retriever = svc._retriever("kure")
+    indexer = svc._indexer("kure")
+    assert created == ["kure"]
+    assert retriever.backend is indexer.backend
+
+
+def test_configured_embedding_model_is_default(tmp_path, fake_backend):
+    cfg = Config(data_dir=tmp_path, qdrant_path=tmp_path / "qdrant", embedding_model="bge_m3")
+    svc = RagService(cfg, backend=fake_backend)
+    svc.ingest_chunks("model-default", [Chunk(chunk_id="model-default::c0", document_id="model-default", text="text")])
+    assert svc.manifests.read("model-default").embedding_model == "bge_m3"
+
+
+def test_empty_collection_status_uses_configured_model(tmp_path, fake_backend):
+    cfg = Config(data_dir=tmp_path, qdrant_path=tmp_path / "qdrant", embedding_model="bge_m3")
+    svc = RagService(cfg, backend=fake_backend)
+    assert "bge_m3" in svc.collection_status()["collections"]
 
 
 def test_search_documents_tool(svc):
@@ -191,6 +221,122 @@ def test_index_embed_failure_preserves_existing(svc, monkeypatch):
     assert svc.search_documents("원본 데이터 보존 확인"), "임베딩 실패로 기존 데이터 유실됨!"
 
 
+def test_upsert_failure_preserves_existing_points(svc, monkeypatch):
+    _seed(svc)
+    store = svc._indexer("kure").store
+    monkeypatch.setattr(
+        store,
+        "upsert_chunks",
+        lambda chunks, vecs: (_ for _ in ()).throw(RuntimeError("upsert")),
+    )
+
+    with pytest.raises(RuntimeError, match="upsert"):
+        svc.ingest_chunks(
+            "d1",
+            [Chunk(chunk_id="d1::c0", document_id="d1", text="replacement")],
+        )
+
+    assert svc.get_chunk("d1::c0")["ok"] is True
+    assert svc.get_chunk("d1::c1")["ok"] is True
+
+
+def test_partial_upsert_failure_restores_pre_replacement_state(svc, monkeypatch):
+    _seed(svc)
+    store = svc._indexer("kure").store
+    old_ids = [point_id_for("d1::c0"), point_id_for("d1::c1")]
+
+    def old_record_state():
+        records = store.client.retrieve(
+            store.collection,
+            ids=old_ids,
+            with_payload=True,
+            with_vectors=True,
+        )
+        return {record.id: record for record in records}
+
+    before = old_record_state()
+    original_upsert = store.upsert_chunks
+
+    def partially_upsert_then_fail(chunks, vecs):
+        original_upsert(chunks[:2], vecs[:2])
+        raise RuntimeError("partial upsert")
+
+    monkeypatch.setattr(store, "upsert_chunks", partially_upsert_then_fail)
+    replacement = [
+        Chunk(chunk_id="d1::c0", document_id="d1", text="overwritten", page=99),
+        Chunk(chunk_id="d1::c2", document_id="d1", text="inserted only"),
+        Chunk(chunk_id="d1::c3", document_id="d1", text="never written"),
+    ]
+
+    with pytest.raises(RuntimeError, match="partial upsert"):
+        svc.ingest_chunks("d1", replacement)
+
+    after = old_record_state()
+    assert after.keys() == before.keys()
+    for point_id, old_record in before.items():
+        restored = after[point_id]
+        assert restored.payload == old_record.payload
+        assert restored.vector["sparse"] == old_record.vector["sparse"]
+        assert restored.vector["dense"] == pytest.approx(old_record.vector["dense"])
+    assert svc.get_chunk("d1::c2")["ok"] is False
+
+
+def test_successful_replacement_deletes_only_stale_points(svc):
+    _seed(svc)
+
+    svc.ingest_chunks(
+        "d1",
+        [Chunk(chunk_id="d1::c0", document_id="d1", text="replacement")],
+    )
+
+    assert svc.get_chunk("d1::c0")["text"] == "replacement"
+    assert svc.get_chunk("d1::c1")["ok"] is False
+
+
+def test_empty_reindex_preserves_existing_document(svc):
+    _seed(svc)
+    old_manifest = svc.manifests.read("d1")
+    old_chunks = (svc.config.parsed_doc_dir("d1") / "chunks.jsonl").read_bytes()
+
+    with pytest.raises(ValueError, match="청크"):
+        svc.ingest_chunks("d1", [])
+
+    assert svc.get_chunk("d1::c0")["ok"] is True
+    assert svc.manifests.read("d1") == old_manifest
+    assert (svc.config.parsed_doc_dir("d1") / "chunks.jsonl").read_bytes() == old_chunks
+
+
+def test_blank_chunk_reindex_preserves_existing_document(svc):
+    _seed(svc)
+    old_manifest = svc.manifests.read("d1")
+    old_chunks = (svc.config.parsed_doc_dir("d1") / "chunks.jsonl").read_bytes()
+    blank = Chunk(chunk_id="d1::blank", document_id="d1", text=" \t\n")
+
+    with pytest.raises(ValueError, match="청크"):
+        svc.ingest_chunks("d1", [blank])
+
+    assert svc.get_chunk("d1::c0")["ok"] is True
+    assert svc.manifests.read("d1") == old_manifest
+    assert (svc.config.parsed_doc_dir("d1") / "chunks.jsonl").read_bytes() == old_chunks
+
+
+def test_chunk_write_failure_preserves_existing_jsonl(svc, monkeypatch):
+    _seed(svc)
+    path = svc.config.parsed_doc_dir("d1") / "chunks.jsonl"
+    old_chunks = path.read_bytes()
+    replacement = [Chunk(chunk_id="d1::new", document_id="d1", text="새 본문")]
+
+    def fail_serialization(self):
+        raise RuntimeError("직렬화 실패 주입")
+
+    monkeypatch.setattr(Chunk, "model_dump_json", fail_serialization)
+
+    with pytest.raises(RuntimeError, match="직렬화 실패"):
+        svc.ingest_chunks("d1", replacement)
+
+    assert path.read_bytes() == old_chunks
+
+
 def test_reindex_tool(svc):
     _seed(svc)
     res = svc.reindex_document("d1", reparse=False)
@@ -254,6 +400,20 @@ def test_collection_status_tool(svc):
     assert st["documents"] == 1
     assert st["by_fiscal_year"].get("2026") == 1
     assert "kure" in st["collections"]
+
+
+def test_ingest_pdf_forces_fresh_parse(svc, monkeypatch, tmp_path):
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"%PDF")
+    seen = []
+
+    def fake_parse(path, doc_id, config, *, fiscal_year=None, doc_name=None, force=False):
+        seen.append(force)
+        return [Chunk(chunk_id=f"{doc_id}::c0", document_id=doc_id, text="new")], {}
+
+    monkeypatch.setattr("rag_mcp.pipeline.parse_and_chunk", fake_parse)
+    assert svc.ingest_pdf(str(pdf), document_id="doc")["ok"] is True
+    assert seen == [True]
 
 def test_ingest_pdf_records_ocr_info_in_manifest_meta(svc, monkeypatch, tmp_path):
     pdf = tmp_path / "ocr.pdf"

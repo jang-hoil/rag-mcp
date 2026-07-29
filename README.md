@@ -474,7 +474,7 @@ Claude Desktop 중심으로 사용할 때는 자주 쓰지 않아도 되지만, 
 |---|---|---|
 | `RAG_DATA_DIR` | `./data` | 색인 산출물, Qdrant, manifest 저장 루트 |
 | `RAG_QDRANT_MODE` | `local` | `local` 또는 `server` |
-| `RAG_QDRANT_PATH` | `./data/qdrant` | local 모드 저장 경로 |
+| `RAG_QDRANT_PATH` | `<RAG_DATA_DIR>/qdrant` | local 모드 저장 경로(미설정 시 `RAG_DATA_DIR` 아래에 생성) |
 | `RAG_QDRANT_URL` | 없음 | server 모드 Qdrant URL |
 | `RAG_EMBEDDING_MODEL` | `kure` | `kure` 또는 `bge_m3` |
 | `RAG_HF_OFFLINE` | `1` | `1`이면 임베딩 모델을 로컬 캐시에서만 로드(HF 네트워크 조회 차단). 정부망 등에서 검색이 멈추는 것을 막는다. 모델을 처음 받을 때만 `0`으로 두고 1회 다운로드 |
@@ -488,6 +488,8 @@ Claude Desktop 중심으로 사용할 때는 자주 쓰지 않아도 되지만, 
 ## 운영 주의사항
 
 Qdrant local path 모드는 **동시에 하나의 프로세스만** 접근해야 합니다.
+
+`RAG_QDRANT_PATH`를 지정하지 않으면 저장 경로는 `<RAG_DATA_DIR>/qdrant`로 자동 결정됩니다. `ingest_pdf`는 전달한 PDF를 매번 새로 파싱한 뒤 색인하므로, 같은 경로의 변환 캐시가 남아 있어도 최신 PDF 내용으로 갱신됩니다. 색인 중에는 다른 변경 작업(`ingest_pdf`, `ingest_chunks`, `delete_document`, `reindex_document`)이 실행되지 않으며, 해당 도구는 현재 작업이 끝난 뒤 다시 시도하라는 `status="busy"` 응답을 반환합니다. 검색·조회 도구는 계속 사용할 수 있습니다.
 
 Claude Desktop에 MCP로 연결해 쓰는 동안에는 다른 터미널에서 `uv run rag-mcp ingest`를 실행하지 마세요. PDF 색인은 Claude Desktop에서 `ingest_pdf`로 요청하는 것이 안전합니다.
 
@@ -504,7 +506,7 @@ RAG MCP\                          ← 프로젝트 루트(= --directory)
 │
 ├─ src\rag_mcp\                   ◆ 소스코드 (25개 모듈)
 │   ├─ server.py                   FastMCP 진입점(도구 등록)
-│   ├─ service.py                  도구 7개 비즈니스 로직
+│   ├─ service.py                  도구 9개 비즈니스 로직
 │   ├─ pipeline.py, pdf_parser.py, chunking.py, table_chunking.py   파싱·청킹
 │   ├─ embeddings.py, sparse.py, tokenizer.py                       임베딩·한국어 토큰화
 │   ├─ retrieval.py, vector_store.py                                검색·Qdrant

@@ -6,6 +6,7 @@ reindex(reparse=False): 기존 chunks.jsonl 재사용 → 재임베딩·재upser
 """
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -44,9 +45,15 @@ class Indexer:
         d = self.config.parsed_doc_dir(document_id)
         d.mkdir(parents=True, exist_ok=True)
         p = self._chunks_path(document_id)
-        with p.open("w", encoding="utf-8") as f:
-            for c in chunks:
-                f.write(c.model_dump_json() + "\n")
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        try:
+            with tmp.open("w", encoding="utf-8") as stream:
+                for chunk in chunks:
+                    stream.write(chunk.model_dump_json() + "\n")
+            os.replace(tmp, p)
+        finally:
+            if tmp.exists():
+                tmp.unlink()
         return p
 
     def load_chunks(self, document_id: str) -> list[Chunk]:
@@ -73,6 +80,9 @@ class Indexer:
 
         metadata: 문서 단위 추가 메타. 각 청크 meta에 병합되어 payload·검색결과·필터에 반영.
         """
+        if not chunks or any(not chunk.text.strip() for chunk in chunks):
+            raise ValueError("색인할 유효 청크가 없습니다")
+
         parsed_metadata = DocumentMetadata.from_raw(metadata)
         metadata_payload = parsed_metadata.to_payload()
         if metadata_payload:
@@ -85,21 +95,36 @@ class Indexer:
         )
         if metadata_payload:
             manifest_fields["meta"] = metadata_payload  # reparse 시 복원용으로 manifest에 보존
-        self.manifests.update(document_id, **manifest_fields)
-        self.save_chunks(document_id, chunks)
+        staged_chunks = self._stage_chunks(document_id, chunks)
 
         # 실패 안전: 임베딩을 먼저 수행(여기서 실패해도 기존 색인은 보존).
-        # 임베딩 성공 후에야 기존 포인트 삭제 → 재삽입(멱등). 삭제~삽입 창은 로컬 동기라 짧다.
+        # 임베딩 성공 뒤 Qdrant 교체 전체를 store 잠금 안에서 수행한다.
         try:
             vecs = self.backend.embed_documents([c.text for c in chunks])
-            self.manifests.update(document_id, status="embedded", num_chunks=len(chunks))
-            self.store.delete_document(document_id)
-            self.store.upsert_chunks(chunks, vecs)
+            self.store.replace_document(document_id, chunks, vecs)
         except Exception:
             # 색인 실패를 manifest에 남겨 추적 가능하게(기존 데이터는 위에서 보존됨)
-            self.manifests.update(document_id, status="error")
+            if staged_chunks.exists():
+                staged_chunks.unlink()
             raise
+        os.replace(staged_chunks, self._chunks_path(document_id))
+        committed_fields = {**manifest_fields, "status": "embedded", "num_chunks": len(chunks)}
+        self.manifests.update(document_id, **committed_fields)
         return self.manifests.update(document_id, status="done", num_chunks=len(chunks))
+
+    def _stage_chunks(self, document_id: str, chunks: list[Chunk]) -> Path:
+        d = self.config.parsed_doc_dir(document_id)
+        d.mkdir(parents=True, exist_ok=True)
+        tmp = self._chunks_path(document_id).with_suffix(".jsonl.stage")
+        try:
+            with tmp.open("w", encoding="utf-8") as stream:
+                for chunk in chunks:
+                    stream.write(chunk.model_dump_json() + "\n")
+            return tmp
+        except Exception:
+            if tmp.exists():
+                tmp.unlink()
+            raise
 
     def reindex_document(self, document_id: str, reparse: bool = False) -> dict:
         """기존 parsed 청크로 재색인. reparse=True는 파서 재실행(마일스톤2~3 연결 지점)."""

@@ -1,6 +1,8 @@
 """config.py / models.py 기반 모듈 테스트."""
 import os
 
+import pytest
+
 from rag_mcp.config import Config
 from rag_mcp.models import Chunk, Manifest, SearchResult, SearchSource
 
@@ -35,6 +37,43 @@ def test_derived_paths(tmp_path):
         assert cfg.manifest_path("doc1").name == "doc1.json"
     finally:
         del os.environ["RAG_DATA_DIR"]
+
+
+@pytest.mark.parametrize("bad", ["", ".", "..", "../escape", r"..\escape", "C:escape", "bad\x00id"])
+def test_document_id_rejects_path_escape(tmp_path, bad):
+    cfg = Config(data_dir=tmp_path / "data")
+    with pytest.raises(ValueError, match="document_id"):
+        cfg.parsed_doc_dir(bad)
+    with pytest.raises(ValueError, match="document_id"):
+        cfg.manifest_path(bad)
+
+
+def test_document_id_allows_korean_spaces_and_parentheses(tmp_path):
+    cfg = Config(data_dir=tmp_path / "data")
+    assert cfg.parsed_doc_dir("2026 예산지침(최종)").is_relative_to(cfg.parsed_dir)
+
+
+def test_qdrant_path_follows_data_dir_when_not_overridden(monkeypatch, tmp_path):
+    monkeypatch.setenv("RAG_DATA_DIR", str(tmp_path / "custom"))
+    monkeypatch.delenv("RAG_QDRANT_PATH", raising=False)
+    cfg = Config()
+    assert cfg.qdrant_path == cfg.data_dir / "qdrant"
+
+
+def test_qdrant_path_explicit_override_wins(monkeypatch, tmp_path):
+    monkeypatch.setenv("RAG_DATA_DIR", str(tmp_path / "custom"))
+    monkeypatch.setenv("RAG_QDRANT_PATH", str(tmp_path / "vectors"))
+    assert Config().qdrant_path == (tmp_path / "vectors").resolve()
+
+
+def test_invalid_qdrant_mode_fails_before_store_open():
+    with pytest.raises(ValueError, match="local|server"):
+        Config(qdrant_mode="sever")
+
+
+def test_invalid_embedding_model_fails_before_store_open():
+    with pytest.raises(ValueError, match="임베딩 모델"):
+        Config(embedding_model="unknown")
 
 
 def test_chunk_payload_roundtrip():
