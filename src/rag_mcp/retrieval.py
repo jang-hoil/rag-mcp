@@ -30,6 +30,7 @@ class SearchOutcome:
     candidates_before_filter: int
     filtered_by_dense: int
     filtered_by_relative: int
+    notices: tuple[str, ...] = ()
 
 
 def _source_from_payload(payload: dict) -> SearchSource:
@@ -132,6 +133,13 @@ class Retriever:
     ) -> SearchOutcome:
         # 컬렉션이 없는 미이관 문서는 KURE 연산 전에 명확히 실패시킨다.
         self.store.require_collection()
+        notices = ()
+        if search_mode == "sparse" and self.config.min_dense_score > 0:
+            notices = (
+                "sparse 검색에서는 dense 벡터를 사용하지 않아 "
+                f"RAG_MIN_DENSE_SCORE={self.config.min_dense_score} 설정을 "
+                "적용하지 않았습니다.",
+            )
         dense_vec = None
         sparse_vec = None
         if search_mode in ("dense", "hybrid"):
@@ -212,6 +220,7 @@ class Retriever:
             candidates_before_filter=candidates_before_filter,
             filtered_by_dense=filtered_by_dense,
             filtered_by_relative=filtered_by_relative,
+            notices=notices,
         )
 
     def _to_result(self, p: ScoredPoint, search_mode: str, q_sparse_idx: set[int]) -> SearchResult:

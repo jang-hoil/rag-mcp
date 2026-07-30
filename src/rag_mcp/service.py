@@ -241,7 +241,19 @@ class RagService:
                     "thresholds": thresholds,
                 }
             }]
-        return [result.model_dump() for result in outcome.results]
+        response = [result.model_dump() for result in outcome.results]
+        response.extend(
+            {
+                "diagnostic": {
+                    "message": notice,
+                    "ignored_thresholds": {
+                        "min_dense_score": self.config.min_dense_score,
+                    },
+                }
+            }
+            for notice in outcome.notices
+        )
+        return response
 
     def get_chunk(self, chunk_id: str, embedding_model: str | None = None) -> dict:
         model = embedding_model or self.config.embedding_model

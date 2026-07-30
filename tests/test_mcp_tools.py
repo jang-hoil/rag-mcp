@@ -331,6 +331,23 @@ def test_search_returns_korean_diagnostic_when_thresholds_remove_all(svc, monkey
     assert diagnostic["thresholds"]["min_dense_score"] == pytest.approx(0.9)
 
 
+def test_sparse_search_reports_ignored_dense_threshold(svc):
+    """sparse 검색에서 dense 기준선을 적용하지 못한 사실을 결과로 알린다."""
+    _seed(svc)
+    svc.config.min_dense_score = 0.8
+
+    response = svc.search_documents(
+        "일반수용비 한도",
+        document_id="d1",
+        search_mode="sparse",
+    )
+
+    diagnostic = response[-1]["diagnostic"]
+    assert "sparse" in diagnostic["message"]
+    assert "적용하지 않았" in diagnostic["message"]
+    assert diagnostic["ignored_thresholds"]["min_dense_score"] == pytest.approx(0.8)
+
+
 def test_metadata_stored_and_shown(svc):
     # metadata가 청크에 저장되고 검색 결과 source.meta로 노출되는지
     chunks = [Chunk(chunk_id="m1::c0", document_id="m1", text="201-01 일반수용비 한도", fiscal_year=2026)]
