@@ -90,26 +90,37 @@ RAG MCP\
 
 ### 5. Claude Desktop에 연결
 
-붙여넣을 경로 **두 개**를 먼저 확인합니다. 2번에서 쓰던 **cmd 창 그대로** 아래 두 줄을 실행하세요.
+설정에 넣을 경로가 **두 개** 필요합니다. 2번에서 쓰던 cmd 창에 아래를 차례로 쳐서 확인하세요.
+
+**첫 번째 — uv.exe 경로**
 
 ```bat
 where uv
-cd
 ```
 
-- `where uv` → **uv 프로그램 위치**
-- `cd` → **지금 있는 폴더 경로.** 2번에서 `cd "RAG MCP"`로 들어와 있으므로 이게 곧 RAG MCP 폴더 경로입니다
-
-이렇게 나옵니다(사람마다 다릅니다).
+화면에 나온 줄이 그 경로입니다.
 
 ```text
 C:\Users\Owner\AppData\Local\Programs\Python\Python311\Scripts\uv.exe
+```
+
+**두 번째 — RAG MCP 폴더 경로**
+
+```bat
+cd
+```
+
+화면에 나온 줄이 그 경로입니다.
+
+```text
 C:\Users\Owner\Desktop\RAG MCP
 ```
 
-> cmd 창을 닫았다면 다시 열고 `cd /d "%USERPROFILE%\Desktop\RAG MCP"`를 실행한 뒤 위 두 줄을 실행하세요.
+> `cd` 뒤에 아무것도 붙이지 않으면 **지금 있는 폴더가 어디인지** 알려줍니다.
+> 2번에서 `cd "RAG MCP"`로 이미 이 폴더에 들어와 있으므로, 그게 곧 RAG MCP 폴더 경로입니다.
 >
-> 폴더 경로는 **파일 탐색기 주소창**을 클릭해서 복사해도 됩니다.
+> cmd 창을 닫았다면 다시 열고 `cd /d "%USERPROFILE%\Desktop\RAG MCP"`를 실행한 뒤 `cd`를 치세요.
+> 파일 탐색기 주소창을 클릭해 복사해도 됩니다.
 
 이제 Claude Desktop → **Settings → Developer → Edit Config**를 열고 아래를 붙여넣습니다. **경로 두 곳만** 방금 확인한 값으로 바꾸세요.
 
