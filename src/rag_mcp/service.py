@@ -31,8 +31,8 @@ _MAX_PAGE_IMAGES = 5
 # 화면 확인용 DPI 범위. 너무 낮으면 한글을 읽기 어렵고 너무 높으면 렌더·전송량이 급증한다.
 _MIN_PAGE_IMAGE_DPI = 72
 _MAX_PAGE_IMAGE_DPI = 300
-# 문서 스캔/전체 페이지는 PNG보다 JPEG가 훨씬 작다. 82는 글자 가독성과 용량의 절충값이다.
-_PAGE_IMAGE_JPEG_QUALITY = 82
+# 실측(2026-07-30): 이 코퍼스의 지침서는 색이 단순해 PNG가 JPEG보다 오히려 작고 선명하다.
+# 같은 페이지에서 PNG 0.21MB 대 JPEG(품질 82) 0.29MB. 최대 페이지도 0.63MB라 압축이 불필요하다.
 # filters로 허용하는 payload 키 (임의 키 주입 방지 — Chunk.payload 필드 중 필터 의미 있는 것)
 _ALLOWED_FILTER_KEYS = frozenset(
     {"fiscal_year", "document_id", "doc_name", "is_table", "has_amount", "has_code", "needs_image", "page"}
@@ -75,7 +75,11 @@ def _normalize_page_numbers(pages: int | list[int]) -> list[int]:
 
 
 def _page_image_bytes(path: Path, max_width: int) -> tuple[bytes, int, int]:
-    """캐시 PNG를 가로폭 제한 JPEG 바이트로 변환한다."""
+    """캐시 PNG를 가로폭 제한 PNG 바이트로 변환한다.
+
+    기본 설정에서는 렌더 DPI와 가로폭 상한이 맞춰져 있어 축소가 일어나지 않고
+    캐시 PNG가 사실상 그대로 전달된다.
+    """
     import fitz
 
     try:
@@ -83,9 +87,6 @@ def _page_image_bytes(path: Path, max_width: int) -> tuple[bytes, int, int]:
     except Exception as exc:
         raise ValueError(f"페이지 이미지 캐시를 읽을 수 없습니다: {path}") from exc
 
-    # JPEG는 알파 채널을 지원하지 않는다. 원본 PNG 캐시는 OCR·경로 호환을 위해 그대로 둔다.
-    if pixmap.alpha:
-        pixmap = fitz.Pixmap(pixmap, 0)
     if pixmap.colorspace is None or pixmap.colorspace.n not in {1, 3}:
         pixmap = fitz.Pixmap(fitz.csRGB, pixmap)
 
@@ -94,7 +95,7 @@ def _page_image_bytes(path: Path, max_width: int) -> tuple[bytes, int, int]:
         pixmap = fitz.Pixmap(pixmap, max_width, height)
 
     return (
-        pixmap.tobytes("jpeg", jpg_quality=_PAGE_IMAGE_JPEG_QUALITY),
+        pixmap.tobytes("png"),
         pixmap.width,
         pixmap.height,
     )
@@ -421,7 +422,7 @@ class RagService:
                     "page": page,
                     "cache_hit": cache_hits[page],
                     "path": str(path),
-                    "mime_type": "image/jpeg",
+                    "mime_type": "image/png",
                     "width": width,
                     "height": height,
                     "image": image,

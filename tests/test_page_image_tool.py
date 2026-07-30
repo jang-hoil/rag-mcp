@@ -55,10 +55,10 @@ def test_get_page_image_uses_cache_without_opening_pdf(
     assert page["page"] == 11
     assert page["cache_hit"] is True
     assert page["path"] == str(cached)
-    assert page["mime_type"] == "image/jpeg"
+    assert page["mime_type"] == "image/png"
     assert page["width"] == 320
     assert page["height"] == 240
-    assert page["image"].startswith(b"\xff\xd8")
+    assert page["image"].startswith(b"\x89PNG")
 
 
 def test_get_page_image_renders_only_missing_pages_with_requested_dpi(
@@ -170,7 +170,7 @@ def test_fastmcp_get_page_image_returns_text_and_actual_image_content(
     """도구 호출 결과에는 경로 문자열만이 아니라 base64 이미지 블록이 포함된다."""
     from rag_mcp import server
 
-    jpeg = b"\xff\xd8test-jpeg\xff\xd9"
+    png_bytes = b"\x89PNG\r\n\x1a\ntest-image"
 
     class FakeService:
         def get_page_image(self, document_id, pages, dpi=None):
@@ -181,10 +181,10 @@ def test_fastmcp_get_page_image_returns_text_and_actual_image_content(
                     "page": 7,
                     "cache_hit": True,
                     "path": str(tmp_path / "pages" / "p7.png"),
-                    "mime_type": "image/jpeg",
+                    "mime_type": "image/png",
                     "width": 320,
                     "height": 480,
-                    "image": jpeg,
+                    "image": png_bytes,
                 }
             ]
 
@@ -204,5 +204,5 @@ def test_fastmcp_get_page_image_returns_text_and_actual_image_content(
     assert "캐시 사용: 예" in content[0].text
     assert "실제 파일 경로:" in content[0].text
     assert isinstance(content[1], ImageContent)
-    assert content[1].mimeType == "image/jpeg"
-    assert base64.b64decode(content[1].data) == jpeg
+    assert content[1].mimeType == "image/png"
+    assert base64.b64decode(content[1].data) == png_bytes

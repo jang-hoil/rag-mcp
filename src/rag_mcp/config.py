@@ -59,13 +59,14 @@ class Config:
     qdrant_url: str = field(default_factory=lambda: _env("RAG_QDRANT_URL", ""))
     embedding_model: str = field(default_factory=lambda: _env("RAG_EMBEDDING_MODEL", "kure"))
     render_dpi: int = field(default_factory=lambda: int(_env("RAG_RENDER_DPI", "200")))
-    # MCP 화면 확인은 색인용 200dpi보다 낮은 144dpi면 한글 본문을 읽으면서 전송량을 줄일 수 있다.
+    # 화면 확인 DPI는 색인 렌더(render_dpi)와 같은 200으로 둔다. 실측상 A4 한 쪽이
+    # 2000x1501 PNG 0.2~0.6MB라 낮출 이유가 없고, 캐시 PNG를 재인코딩 없이 그대로 쓸 수 있다.
     page_image_dpi: int = field(
-        default_factory=lambda: int(_env("RAG_PAGE_IMAGE_DPI", "144"))
+        default_factory=lambda: int(_env("RAG_PAGE_IMAGE_DPI", "200"))
     )
-    # 전체 페이지를 base64로 실을 때 응답이 커지지 않도록 전송 이미지 가로폭을 제한한다.
+    # 200dpi A4 가로폭(약 1654~2000px)을 넘지 않게 잡아 기본 설정에서는 축소가 일어나지 않는다.
     page_image_max_width: int = field(
-        default_factory=lambda: int(_env("RAG_PAGE_IMAGE_MAX_WIDTH", "1600"))
+        default_factory=lambda: int(_env("RAG_PAGE_IMAGE_MAX_WIDTH", "2000"))
     )
     # OCR: off | auto(스캔 PDF hybrid 후보·needs_image 구간) | force(needs_image 전부)
     ocr_mode: str = field(default_factory=lambda: _env("RAG_OCR", "auto"))

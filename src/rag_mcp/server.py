@@ -98,6 +98,8 @@ async def get_page_image(
     content = []
     for page_image in page_images:
         cache_text = "예" if page_image["cache_hit"] else "아니요(이번 요청에서 렌더)"
+        # 형식은 서비스가 정한다(mime_type). 여기서 고정하면 서비스 변경과 어긋난다.
+        image_format = page_image["mime_type"].split("/")[-1]
         content.append(
             TextContent(
                 type="text",
@@ -106,14 +108,15 @@ async def get_page_image(
                     f"page: {page_image['page']}\n"
                     f"캐시 사용: {cache_text}\n"
                     f"실제 파일 경로: {page_image['path']}\n"
-                    f"반환 이미지: JPEG {page_image['width']}x{page_image['height']}"
+                    f"반환 이미지: {image_format.upper()} "
+                    f"{page_image['width']}x{page_image['height']}"
                 ),
             )
         )
         content.append(
             Image(
                 data=page_image["image"],
-                format="jpeg",
+                format=image_format,
             )
         )
     return content

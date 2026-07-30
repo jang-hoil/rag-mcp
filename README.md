@@ -415,7 +415,7 @@ Claude Desktop은 내부적으로 `search_documents` 도구를 호출해 결과�
 경로 문자열**입니다. Claude Desktop은 이 경로만으로 이미지를 화면에 표시할 수 없습니다.
 원본 페이지를 눈으로 확인하려면 `get_page_image(document_id, pages)`를 호출하세요.
 `needs_image`가 아닌 일반 텍스트 페이지도 볼 수 있고, 한 번에 최대 5쪽을 실제 MCP 이미지
-콘텐츠(JPEG)와 페이지·캐시·파일 경로 설명으로 함께 반환합니다.
+콘텐츠(PNG)와 페이지·캐시·파일 경로 설명으로 함께 반환합니다.
 
 ### 문서를 삭제할 때
 
@@ -504,8 +504,8 @@ Claude Desktop 중심으로 사용할 때는 자주 쓰지 않아도 되지만, 
 | `RAG_CHUNK_BOUNDARY_WINDOW` | `160` | 본문 800자 목표치 앞뒤의 문장 경계 탐색 범위 |
 | `RAG_HF_OFFLINE` | `1` | `1`이면 임베딩 모델을 로컬 캐시에서만 로드(HF 네트워크 조회 차단). 정부망 등에서 검색이 멈추는 것을 막는다. 모델을 처음 받을 때만 `0`으로 두고 1회 다운로드 |
 | `RAG_RENDER_DPI` | `200` | 표/페이지 이미지 렌더 DPI |
-| `RAG_PAGE_IMAGE_DPI` | `144` | `get_page_image`가 캐시에 없는 페이지를 화면 확인용으로 렌더할 기본 DPI |
-| `RAG_PAGE_IMAGE_MAX_WIDTH` | `1600` | MCP 응답 이미지의 최대 가로 픽셀(초과 시 비율 유지 축소) |
+| `RAG_PAGE_IMAGE_DPI` | `200` | `get_page_image`가 캐시에 없는 페이지를 화면 확인용으로 렌더할 기본 DPI |
+| `RAG_PAGE_IMAGE_MAX_WIDTH` | `2000` | MCP 응답 이미지의 최대 가로 픽셀(초과 시 비율 유지 축소) |
 | `RAG_OCR` | `auto` | `off`, `auto`, `force` |
 | `RAG_OCR_MIN_CHARS` | `30` | 스캔 PDF 판정 임계(페이지당 글자 수가 이 값 미만이면 빈약한 페이지) |
 | `RAG_OCR_LANG` | `kor+eng` | Tesseract OCR 언어 |
