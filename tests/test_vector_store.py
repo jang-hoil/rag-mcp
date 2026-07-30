@@ -45,8 +45,8 @@ def test_upsert_and_count(store, fake_backend):
 def test_hybrid_search_finds_code_chunk(store, fake_backend):
     _seed(store, fake_backend)
     qd = fake_backend.embed_query("201-01 한도")
-    from rag_mcp.sparse import to_sparse
-    qs = to_sparse("201-01 한도")
+    from rag_mcp.sparse import to_sparse_query
+    qs = to_sparse_query("201-01 한도")
     points = store.query(qd, qs, top_k=5, search_mode="hybrid")
     ids = [p.payload["chunk_id"] for p in points]
     assert "doc1::c0" in ids, ids
@@ -56,8 +56,8 @@ def test_hybrid_search_finds_code_chunk(store, fake_backend):
 def test_fiscal_year_filter(store, fake_backend):
     _seed(store, fake_backend)
     qd = fake_backend.embed_query("단가 기준")
-    from rag_mcp.sparse import to_sparse
-    qs = to_sparse("단가 기준")
+    from rag_mcp.sparse import to_sparse_query
+    qs = to_sparse_query("단가 기준")
     points = store.query(qd, qs, top_k=5, search_mode="hybrid", fiscal_year=2026)
     years = [p.payload["fiscal_year"] for p in points]
     assert all(y == 2026 for y in years), years
@@ -66,8 +66,8 @@ def test_fiscal_year_filter(store, fake_backend):
 
 def test_sparse_only_exact_code(store, fake_backend):
     _seed(store, fake_backend)
-    from rag_mcp.sparse import to_sparse
-    qs = to_sparse("201-01")
+    from rag_mcp.sparse import to_sparse_query
+    qs = to_sparse_query("201-01")
     points = store.query(None, qs, top_k=5, search_mode="sparse")
     ids = [p.payload["chunk_id"] for p in points]
     assert "doc1::c0" in ids
@@ -128,7 +128,7 @@ def test_concurrent_query_during_upsert_is_safe(store, fake_backend):
     # VectorStore 락이 접근을 직렬화하므로 예외 없이 동작해야 한다(비동기 ingest 전제).
     import threading
 
-    from rag_mcp.sparse import to_sparse
+    from rag_mcp.sparse import to_sparse_query
 
     _seed(store, fake_backend)  # 초기 데이터(검색이 빈 컬렉션을 만나지 않게)
     errors = []
@@ -148,7 +148,7 @@ def test_concurrent_query_during_upsert_is_safe(store, fake_backend):
     def reader():
         try:
             qd = fake_backend.embed_query("일반수용비")
-            qs = to_sparse("일반수용비")
+            qs = to_sparse_query("일반수용비")
             for _ in range(40):
                 if stop.is_set():
                     break

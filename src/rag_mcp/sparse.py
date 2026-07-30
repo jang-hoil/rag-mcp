@@ -80,8 +80,3 @@ def average_document_length(texts: Iterable[str]) -> float:
     """문서 내 청크들의 평균 토큰 수를 계산한다."""
     lengths = [len(tokenize(text)) for text in texts]
     return sum(lengths) / len(lengths) if lengths else 0.0
-
-
-def to_sparse(text: str) -> tuple[list[int], list[float]]:
-    """하위 호환용 질의 sparse 별칭."""
-    return to_sparse_query(text)

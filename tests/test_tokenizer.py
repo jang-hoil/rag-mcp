@@ -3,7 +3,6 @@ import pytest
 
 from rag_mcp.tokenizer import tokenize
 from rag_mcp.sparse import (
-    to_sparse,
     to_sparse_document,
     to_sparse_query,
     token_to_index,
@@ -57,8 +56,8 @@ def test_same_token_same_index():
 
 def test_sparse_query_doc_overlap():
     """질의와 문서가 공유하는 코드 토큰이 같은 sparse 인덱스를 가진다."""
-    doc_idx, _ = to_sparse("201-01 일반수용비 한도 50,000,000원")
-    q_idx, _ = to_sparse("201-01 한도")
+    doc_idx, _ = to_sparse_query("201-01 일반수용비 한도 50,000,000원")
+    q_idx, _ = to_sparse_query("201-01 한도")
     overlap = set(doc_idx) & set(q_idx)
     assert overlap, "공유 토큰의 인덱스 겹침 없음"
     # 201-01, 한도 두 토큰이 겹쳐야 함
@@ -68,7 +67,7 @@ def test_sparse_query_doc_overlap():
 
 def test_sparse_values_are_tf():
     """value는 term frequency (반복 토큰 빈도 반영)."""
-    idx, val = to_sparse("한도 한도 한도")
+    idx, val = to_sparse_query("한도 한도 한도")
     pos = idx.index(token_to_index("한도"))
     assert val[pos] >= 3.0
 
