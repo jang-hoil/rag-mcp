@@ -2,22 +2,26 @@
 
 회계·예산 지침서 RAG 서버를 **Claude Desktop**(및 동일 방식의 MCP 클라이언트)에
 stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰이크로 검증됨
-(`initialize` → `tools/list` 9개 → `collection_status` 정상 반환 확인).
+(`initialize` → `tools/list` 10개 → `collection_status` 정상 반환 확인).
 
 ## 1. 동작 방식 (전제)
 - 서버는 `FastMCP("rag-mcp").run()` → **기본 transport = stdio**.
   클라이언트가 서버 프로세스를 직접 띄우고 stdin/stdout으로 JSON-RPC를 주고받는다.
 - stdio에서 **stdout은 프로토콜 전용 채널**. 로그·진단 출력은 반드시 stderr로만
   (cli.py의 시작 메시지는 `file=sys.stderr`로 출력 — 의도된 안전 설계).
-- 무거운 KURE 임베딩 모델은 lazy 로딩 → **서버 시작은 즉시**, 모델은 첫 검색 도구
-  호출 때 로드(이미 `~/.cache/huggingface`에 캐시됨).
+- 기동 순서는 **preflight(동기) → warmup(백그라운드 스레드) → `mcp.run()`** 이다(`server.py:156-194`).
+  - preflight는 Qdrant 저장소를 열어 **중복 인스턴스를 걸러낸다.** 다른 프로세스가 이미
+    쥐고 있으면 `StorageBusyError`로 조용히 종료한다(파일락 충돌 방지).
+  - KURE 임베딩 모델 적재는 **백그라운드에서 진행**되므로 서버는 즉시 `initialize`에 응답한다.
+    워밍업이 끝나기 전에 검색을 호출하면 그 호출이 모델 적재를 기다린다.
 
 ## 2. 사전 요구사항
 - `uv` + Python 3.11 `.venv` 구성 완료 (`uv run pytest -q` 통과 상태).
-- KURE-v1 모델 캐시 존재(없으면 첫 검색 시 다운로드 — 정부망은 truststore가 자동 처리).
-- 실행 파일 절대경로(이 PC 기준):
-  - uv: `C:\Users\Owner\AppData\Local\Programs\Python\Python313\Scripts\uv.exe`
-  - 프로젝트: `C:\Users\Owner\Desktop\RAG MCP`
+- KURE-v1 모델 캐시 존재(없으면 첫 색인·검색 시 다운로드 — 정부망은 truststore가 자동 처리).
+- 색인할 PDF는 프로젝트 안 `pdf\` 폴더에 두기를 권장(경로가 매니페스트에 기록되므로).
+- 아래 두 절대경로를 미리 확인해 둔다. 확인 방법은 [README.md](README.md)의 설치 5단계 참고.
+  - `uv.exe` 경로 — `where uv`
+  - 프로젝트 폴더 경로 — cmd 프롬프트의 커서 왼쪽에 표시됨
 
 ## 3. Claude Desktop 등록
 설정 파일: `%APPDATA%\Claude\claude_desktop_config.json`
@@ -50,7 +54,7 @@ stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰�
 수정 후 Claude Desktop을 **완전히 종료 후 재시작**해야 반영된다.
 
 ## 4. 검증
-1. 재시작 후 채팅 입력창의 도구/플러그 아이콘에서 `rag-mcp` 도구 9개가 보이는지 확인.
+1. 재시작 후 채팅 입력창의 도구/플러그 아이콘에서 `rag-mcp` 도구 10개가 보이는지 확인.
 2. CLI 사전 점검(서버가 stdio로 정상 응답하는지 코드로 확인):
    ```
    uv --directory "C:\Users\Owner\Desktop\RAG MCP" run rag-mcp status
@@ -66,10 +70,11 @@ stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰�
    python -c "import json; json.load(open(r'%APPDATA%\Claude\claude_desktop_config.json', encoding='utf-8')); print('OK')"
    ```
 
-## 5. 노출되는 도구 9개
+## 5. 노출되는 도구 10개
 | 도구 | 용도 |
 |---|---|
-| `search_documents` | 하이브리드(dense+sparse RRF) 검색. `fiscal_year`로 연도 한정 |
+| `search_documents` | 하이브리드(dense+sparse RRF) 검색. **`document_id` 필수** — 문서별 컬렉션이라 어느 지침을 볼지 지정해야 한다. 누락 시 사용 가능한 목록을 담은 오류를 돌려준다. `fiscal_year`로 연도 한정 |
+| `get_page_image` | 원본 페이지를 **실제 이미지(PNG)** 로 반환. 한 번에 최대 5쪽. 이미 렌더된 페이지는 캐시에서 꺼내므로 원본 PDF가 없어도 된다 |
 | `ingest_pdf` | PDF 색인을 **백그라운드로 시작**하고 즉시 `job_id` 반환(비블로킹) |
 | `ingest_status` | `ingest_pdf`가 준 `job_id`로 진행 상태 조회(`running`/`done`/`error`) |
 | `get_chunk` | `chunk_id` 단건 조회 |
@@ -120,4 +125,10 @@ stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰�
 - 도구가 안 보임 → Claude Desktop 완전 종료 후 재시작. config JSON 유효성 재확인.
 - `uv`/모듈 못 찾음 → command가 uv.exe **절대경로**인지, `--directory` 경로가 맞는지.
 - 검색 시 한글 깨짐 → cli는 stdout UTF-8 강제(처리됨). 클라이언트 측 표시 문제는 별개.
-- 첫 검색이 느림 → KURE 모델 lazy 로딩(최초 1회). 이후 캐시로 빨라짐.
+- 첫 검색이 느림 → 기동 직후에는 백그라운드 워밍업이 끝나기 전일 수 있다. 잠시 뒤 다시 시도.
+- `search_documents`가 오류 → `document_id`를 지정했는지 확인. 문서별 컬렉션이라 필수다.
+  오류 메시지에 사용 가능한 `document_id` 목록이 함께 온다.
+- 검색 결과가 비어 있고 진단 정보만 옴 → 관련도 기준선(`RAG_MIN_DENSE_SCORE`)에 걸린 것.
+  무관한 근거를 쓰지 않도록 막는 정상 동작이다. 값 조정은 [운영가이드.md](운영가이드.md) 참고.
+- 페이지 이미지가 안 나옴 → 캐시에 없고 원본 PDF 경로도 끊긴 경우. 오류 메시지에 기대 경로가
+  나오므로 그 자리에 PDF를 두면 된다.

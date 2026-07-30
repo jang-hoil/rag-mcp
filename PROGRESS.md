@@ -227,7 +227,8 @@
 - `tokenizer.py`(코드/금액 보존)+`sparse.py`(blake2b idx, tf, IDF modifier 전제)
 - `embeddings.py`(KURE lazy) · `rerank.py`(off/lexical/cross) · `vector_store.py`(dense+sparse, 각 Prefetch.filter)
 - `manifest.py`(atomic·멱등) · `indexer.py`(chunks.jsonl·reindex) · `retrieval.py`(search/get_chunk)
-- `jobs.py`(비동기 ingest job·JobStore) · `service.py`(도구 9개 로직·submit_ingest/ingest_status·review_before_ingest)
+- `jobs.py`(비동기 ingest job·JobStore) · `service.py`(도구 10개 로직·submit_ingest/ingest_status·review_before_ingest·get_page_image)
+- `rerank.py`(off|lexical|cross 리랭커 — lexical은 모델 불필요)
 - `server.py`(FastMCP, async+anyio.to_thread) · `cli.py`(동기 ingest 유지)
 - 테스트: 모두 FakeEmbeddingBackend(`tests/conftest.py`)로 모델 없이 구동.
 
