@@ -19,18 +19,6 @@ class OcrBackend(Protocol):
     def recognize(self, image_path: Path) -> str: ...
 
 
-class FakeOcrBackend:
-    """테스트용 — 경로별 고정 텍스트."""
-
-    def __init__(self, texts: dict[str, str] | None = None):
-        self._texts = texts or {}
-        self.calls = 0
-
-    def recognize(self, image_path: Path) -> str:
-        self.calls += 1
-        return self._texts.get(str(image_path), "")
-
-
 class TesseractOcrBackend:
     def __init__(self, lang: str = "kor+eng"):
         self.lang = lang

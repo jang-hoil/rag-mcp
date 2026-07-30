@@ -1,7 +1,21 @@
 """ocr — needs_image PNG 보강 + Fake backend."""
+from pathlib import Path
+
 from rag_mcp.config import Config
 from rag_mcp.models import Chunk
-from rag_mcp.ocr import FakeOcrBackend, augment_chunks_with_ocr
+from rag_mcp.ocr import augment_chunks_with_ocr
+
+
+class FakeOcrBackend:
+    """테스트용 — 경로별 고정 텍스트. 운영 코드에 두지 않는다."""
+
+    def __init__(self, texts: dict[str, str] | None = None):
+        self._texts = texts or {}
+        self.calls = 0
+
+    def recognize(self, image_path: Path) -> str:
+        self.calls += 1
+        return self._texts.get(str(image_path), "")
 
 
 def test_augment_appends_ocr_text_and_refreshes_flags(tmp_path):
