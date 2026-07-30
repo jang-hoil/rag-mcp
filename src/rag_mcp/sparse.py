@@ -2,13 +2,15 @@
 
 스펙 §6.5, §11:
   - 토큰 → (인덱스, 가중치)로 변환해 Qdrant sparse에 저장. **별도 BM25 pkl 금지**.
-  - IDF는 Qdrant 서버측(Modifier.IDF)으로 계산하므로 value는 **term frequency**를 넣는다.
+  - IDF는 Qdrant 서버측(Modifier.IDF)으로 계산한다.
+  - 문서 value는 BM25 TF 포화값, 질의 value는 raw TF를 사용한다(표준 BM25 비대칭).
   - 인덱스는 토큰의 안정 해시(blake2b) → uint32. Python hash()는 실행마다 달라져 금지.
 """
 from __future__ import annotations
 
 import hashlib
 from collections import Counter
+from collections.abc import Iterable
 
 from .tokenizer import tokenize
 
@@ -22,20 +24,64 @@ def token_to_index(token: str) -> int:
     return int.from_bytes(digest, "big") % _INDEX_SPACE
 
 
-def to_sparse(text: str) -> tuple[list[int], list[float]]:
-    """텍스트 → (indices, values). value = term frequency.
+def _by_index(counts: Counter[str], weight) -> tuple[list[int], list[float]]:
+    """토큰 빈도를 안정 해시 인덱스로 합친다."""
+    by_index: dict[int, float] = {}
+    for token, term_frequency in counts.items():
+        index = token_to_index(token)
+        by_index[index] = by_index.get(index, 0.0) + weight(term_frequency)
+    indices = list(by_index)
+    return indices, [by_index[index] for index in indices]
 
-    같은 토큰이 같은 인덱스로 매핑되므로 인덱싱·질의가 같은 토크나이저를 쓰면 정합.
+
+def to_sparse_query(text: str) -> tuple[list[int], list[float]]:
+    """질의 → raw TF sparse 벡터.
+
+    표준 BM25는 문서 TF만 포화하므로 질의에는 길이 정규화나 포화를 적용하지 않는다.
     """
     tokens = tokenize(text)
     if not tokens:
         return [], []
     counts: Counter[str] = Counter(tokens)
-    # 인덱스 충돌(다른 토큰 같은 인덱스) 시 빈도 합산
-    by_index: dict[int, float] = {}
-    for tok, tf in counts.items():
-        idx = token_to_index(tok)
-        by_index[idx] = by_index.get(idx, 0.0) + float(tf)
-    indices = list(by_index.keys())
-    values = [by_index[i] for i in indices]
-    return indices, values
+    return _by_index(counts, lambda term_frequency: float(term_frequency))
+
+
+def to_sparse_document(
+    text: str,
+    *,
+    avgdl: float,
+    k1: float = 1.2,
+    b: float = 0.75,
+) -> tuple[list[int], list[float]]:
+    """문서 청크 → BM25 TF 포화 sparse 벡터."""
+    tokens = tokenize(text)
+    if not tokens:
+        return [], []
+    if avgdl <= 0:
+        raise ValueError("avgdl은 토큰이 있는 문서에서 0보다 커야 합니다")
+    if k1 <= 0:
+        raise ValueError("k1은 0보다 커야 합니다")
+    if not 0 <= b <= 1:
+        raise ValueError("b는 0 이상 1 이하여야 합니다")
+
+    document_length = len(tokens)
+    counts: Counter[str] = Counter(tokens)
+
+    def saturated(term_frequency: int) -> float:
+        denominator = term_frequency + k1 * (
+            1 - b + b * document_length / avgdl
+        )
+        return term_frequency * (k1 + 1) / denominator
+
+    return _by_index(counts, saturated)
+
+
+def average_document_length(texts: Iterable[str]) -> float:
+    """문서 내 청크들의 평균 토큰 수를 계산한다."""
+    lengths = [len(tokenize(text)) for text in texts]
+    return sum(lengths) / len(lengths) if lengths else 0.0
+
+
+def to_sparse(text: str) -> tuple[list[int], list[float]]:
+    """하위 호환용 질의 sparse 별칭."""
+    return to_sparse_query(text)

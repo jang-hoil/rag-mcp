@@ -123,9 +123,9 @@ class RagService:
         # 더미 임베딩으로 SentenceTransformer 실제 로드를 강제(lazy 트리거).
         self._embedding_backend(model).embed_query("워밍업")
         # Kiwi 토크나이저도 첫 호출 시 로딩되므로 함께 데운다(sparse 검색 콜드 스타트 제거).
-        from .sparse import to_sparse
+        from .sparse import to_sparse_query
 
-        to_sparse("워밍업")
+        to_sparse_query("워밍업")
 
     def _indexer(self, model: str, document_id: str) -> Indexer:
         key = (model, document_id)

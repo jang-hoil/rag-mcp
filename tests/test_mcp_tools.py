@@ -410,7 +410,7 @@ def test_upsert_failure_preserves_existing_points(svc, monkeypatch):
     monkeypatch.setattr(
         store,
         "upsert_chunks",
-        lambda chunks, vecs: (_ for _ in ()).throw(RuntimeError("upsert")),
+        lambda chunks, vecs, **kwargs: (_ for _ in ()).throw(RuntimeError("upsert")),
     )
 
     with pytest.raises(RuntimeError, match="upsert"):
@@ -440,8 +440,8 @@ def test_partial_upsert_failure_restores_pre_replacement_state(svc, monkeypatch)
     before = old_record_state()
     original_upsert = store.upsert_chunks
 
-    def partially_upsert_then_fail(chunks, vecs):
-        original_upsert(chunks[:2], vecs[:2])
+    def partially_upsert_then_fail(chunks, vecs, **kwargs):
+        original_upsert(chunks[:2], vecs[:2], **kwargs)
         raise RuntimeError("partial upsert")
 
     monkeypatch.setattr(store, "upsert_chunks", partially_upsert_then_fail)
@@ -525,6 +525,40 @@ def test_reindex_tool(svc):
     res = svc.reindex_document("d1", reparse=False)
     assert res["ok"] is True
     assert res["num_chunks"] == 2
+
+
+def test_reindex_restores_manifest_avgdl_and_sparse_values(svc, monkeypatch):
+    """일반 재색인은 저장된 avgdl을 복원해 동일 sparse 값을 다시 만든다."""
+    chunks = [
+        Chunk(chunk_id="avg::c0", document_id="avg", text="한도 한도 한도"),
+        Chunk(chunk_id="avg::c1", document_id="avg", text="절차 기준"),
+    ]
+    svc.ingest_chunks("avg", chunks)
+    manifest = svc.manifests.read("avg")
+    assert manifest is not None
+    assert manifest.avgdl == pytest.approx(2.5)
+
+    store = svc._indexer("kure", "avg").store
+    point_id = point_id_for("avg::c0")
+
+    def sparse_values():
+        record = store.client.retrieve(
+            store.collection,
+            ids=[point_id],
+            with_payload=True,
+            with_vectors=True,
+        )[0]
+        return record.vector["sparse"]
+
+    before = sparse_values()
+    monkeypatch.setattr(
+        "rag_mcp.indexer.average_document_length",
+        lambda texts: (_ for _ in ()).throw(AssertionError("avgdl을 다시 계산함")),
+    )
+    result = svc.reindex_document("avg", reparse=False)
+
+    assert result["ok"] is True
+    assert sparse_values() == before
 
 
 def test_reindex_reparse_without_source_pdf(svc):

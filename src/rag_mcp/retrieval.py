@@ -15,7 +15,7 @@ from .config import Config
 from .embeddings import EmbeddingBackend, get_backend
 from .models import SearchResult, SearchSource
 from .request_models import FilterValue
-from .sparse import to_sparse
+from .sparse import to_sparse_query
 from .vector_store import VectorStore
 
 
@@ -76,7 +76,7 @@ class Retriever:
         if search_mode in ("dense", "hybrid"):
             dense_vec = self.backend.embed_query(query)
         if search_mode in ("sparse", "hybrid"):
-            sparse_vec = to_sparse(query)
+            sparse_vec = to_sparse_query(query)
 
         q_sparse_idx = set(sparse_vec[0]) if sparse_vec else set()
         points = self.store.query(
@@ -94,7 +94,7 @@ class Retriever:
             matched_by.append("dense")
         if search_mode in ("sparse", "hybrid"):
             # 질의 sparse 토큰이 청크 텍스트와 겹치면 sparse 기여로 표기
-            doc_idx, _ = to_sparse(payload.get("text", ""))
+            doc_idx, _ = to_sparse_query(payload.get("text", ""))
             if q_sparse_idx & set(doc_idx):
                 matched_by.append("sparse")
 

@@ -481,6 +481,8 @@ Claude Desktop 중심으로 사용할 때는 자주 쓰지 않아도 되지만, 
 | `RAG_QDRANT_PATH` | `<RAG_DATA_DIR>/qdrant` | local 모드 저장 경로(미설정 시 `RAG_DATA_DIR` 아래에 생성) |
 | `RAG_QDRANT_URL` | 없음 | server 모드 Qdrant URL |
 | `RAG_EMBEDDING_MODEL` | `kure` | `kure` 또는 `bge_m3` |
+| `RAG_BM25_K1` | `1.2` | 문서 sparse TF 포화 강도. 질의에는 적용하지 않음 |
+| `RAG_BM25_B` | `0.75` | 문서 sparse 청크 길이 정규화 강도(0~1) |
 | `RAG_HF_OFFLINE` | `1` | `1`이면 임베딩 모델을 로컬 캐시에서만 로드(HF 네트워크 조회 차단). 정부망 등에서 검색이 멈추는 것을 막는다. 모델을 처음 받을 때만 `0`으로 두고 1회 다운로드 |
 | `RAG_RENDER_DPI` | `200` | 표/페이지 이미지 렌더 DPI |
 | `RAG_OCR` | `auto` | `off`, `auto`, `force` |
@@ -496,6 +498,12 @@ Qdrant local path 모드는 **동시에 하나의 프로세스만** 접근해야
 Qdrant 컬렉션은 임베딩 모델과 문서별로 분리됩니다. 이름은
 `rag_<model>_<정규화된 document_id>_<원본 ID blake2b 6자리>` 형식이며,
 문서별 sparse IDF 통계가 다른 지침의 어휘 빈도에 섞이지 않습니다.
+신규 색인은 문서별 평균 청크 토큰 수(`avgdl`)를 매니페스트에 저장하고,
+문서 sparse TF에 BM25 포화를 적용합니다. 질의 sparse는 raw TF를 유지합니다.
+
+이 변경은 저장 벡터를 바꾸므로 **기존 1,077청크 색인에는 자동 반영되지 않습니다.**
+원본 PDF 경로가 끊긴 문서가 있어 이번 변경에서는 재색인하지 않았습니다. 따라서
+기존 색인과 신규 색인의 sparse 값이 다르며, 신규 색인부터 BM25 TF 포화가 적용됩니다.
 
 `RAG_QDRANT_PATH`를 지정하지 않으면 저장 경로는 `<RAG_DATA_DIR>/qdrant`로 자동 결정됩니다. 한 서버 프로세스 안에서는 문서별 저장소가 같은 Qdrant 클라이언트 락을 공유하므로, 색인 중 검색·목록 조회가 들어와도 local 저장소 접근은 순서대로 실행됩니다. `ingest_pdf`는 전달한 PDF를 매번 새로 파싱한 뒤 색인하므로, 같은 경로의 변환 캐시가 남아 있어도 최신 PDF 내용으로 갱신됩니다. 색인 중에는 다른 변경 작업(`ingest_pdf`, `ingest_chunks`, `delete_document`, `reindex_document`)이 실행되지 않으며, 해당 도구는 현재 작업이 끝난 뒤 다시 시도하라는 `status="busy"` 응답을 반환합니다. 검색·조회 도구는 계속 사용할 수 있습니다.
 

@@ -16,7 +16,7 @@ from qdrant_client import QdrantClient, models
 from .config import Config, validate_document_id
 from .models import Chunk
 from .request_models import FilterValue
-from .sparse import to_sparse
+from .sparse import average_document_length, to_sparse_document
 
 class StorageBusyError(RuntimeError):
     """Qdrant local 저장소를 다른 프로세스가 이미 열고 있을 때(단일 writer 위반).
@@ -125,7 +125,13 @@ class VectorStore:
                 pass
 
     # --- 색인 ---
-    def upsert_chunks(self, chunks: list[Chunk], dense_vectors: list[list[float]]) -> int:
+    def upsert_chunks(
+        self,
+        chunks: list[Chunk],
+        dense_vectors: list[list[float]],
+        *,
+        avgdl: float | None = None,
+    ) -> int:
         if len(chunks) != len(dense_vectors):
             raise ValueError("chunks와 dense_vectors 길이 불일치")
         mismatched = [chunk.document_id for chunk in chunks if chunk.document_id != self.document_id]
@@ -134,9 +140,19 @@ class VectorStore:
                 f"컬렉션 document_id({self.document_id})와 다른 청크가 포함되었습니다: "
                 f"{sorted(set(mismatched))}"
             )
+        effective_avgdl = (
+            average_document_length(chunk.text for chunk in chunks)
+            if avgdl is None
+            else avgdl
+        )
         points = []
         for chunk, dvec in zip(chunks, dense_vectors):
-            idx, val = to_sparse(chunk.text)
+            idx, val = to_sparse_document(
+                chunk.text,
+                avgdl=effective_avgdl,
+                k1=self.config.bm25_k1,
+                b=self.config.bm25_b,
+            )
             points.append(
                 models.PointStruct(
                     id=point_id_for(chunk.chunk_id),
@@ -222,6 +238,8 @@ class VectorStore:
         document_id: str,
         chunks: list[Chunk],
         dense_vectors: list[list[float]],
+        *,
+        avgdl: float | None = None,
     ) -> int:
         """문서 포인트 교체를 직렬화하고 실패 시 교체 전 상태로 복구한다."""
         new_point_ids = {point_id_for(chunk.chunk_id) for chunk in chunks}
@@ -257,7 +275,10 @@ class VectorStore:
                     f"Qdrant point ID collision for document {document_id!r}: {details}"
                 )
             try:
-                count = self.upsert_chunks(chunks, dense_vectors)
+                if avgdl is None:
+                    count = self.upsert_chunks(chunks, dense_vectors)
+                else:
+                    count = self.upsert_chunks(chunks, dense_vectors, avgdl=avgdl)
                 self.delete_point_ids(old_point_ids - new_point_ids)
                 return count
             except Exception as primary_error:

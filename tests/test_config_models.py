@@ -88,6 +88,20 @@ def test_qdrant_path_explicit_override_wins(monkeypatch, tmp_path):
     assert Config().qdrant_path == (tmp_path / "vectors").resolve()
 
 
+def test_bm25_defaults_and_environment_overrides(monkeypatch):
+    monkeypatch.delenv("RAG_BM25_K1", raising=False)
+    monkeypatch.delenv("RAG_BM25_B", raising=False)
+    defaults = Config()
+    assert defaults.bm25_k1 == pytest.approx(1.2)
+    assert defaults.bm25_b == pytest.approx(0.75)
+
+    monkeypatch.setenv("RAG_BM25_K1", "1.8")
+    monkeypatch.setenv("RAG_BM25_B", "0.4")
+    configured = Config()
+    assert configured.bm25_k1 == pytest.approx(1.8)
+    assert configured.bm25_b == pytest.approx(0.4)
+
+
 def test_invalid_qdrant_mode_fails_before_store_open():
     with pytest.raises(ValueError, match="local|server"):
         Config(qdrant_mode="sever")
@@ -136,6 +150,7 @@ def test_search_result_schema():
 def test_manifest_status_default():
     m = Manifest(document_id="doc1")
     assert m.status == "parsing"
+    assert m.avgdl is None
     m.status = "done"
     assert m.status == "done"
 

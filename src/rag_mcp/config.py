@@ -68,6 +68,9 @@ class Config:
     # 스캔 PDF 문서 단위 OpenDataLoader hybrid (off면 페이지 OCR만; hybrid 서버 별도 기동)
     odl_hybrid: str = field(default_factory=lambda: _env("RAG_ODL_HYBRID", "off"))
     odl_hybrid_url: str = field(default_factory=lambda: _env("RAG_ODL_HYBRID_URL", ""))
+    # 문서 sparse 벡터의 BM25 TF 포화 계수. 질의 벡터에는 적용하지 않는다.
+    bm25_k1: float = field(default_factory=lambda: float(_env("RAG_BM25_K1", "1.2")))
+    bm25_b: float = field(default_factory=lambda: float(_env("RAG_BM25_B", "0.75")))
 
     def __post_init__(self) -> None:
         if self.qdrant_mode not in {"local", "server"}:
@@ -77,6 +80,10 @@ class Config:
                 f"알 수 없는 임베딩 모델: {self.embedding_model} "
                 f"(가능: {list(COLLECTION_BY_MODEL)})"
             )
+        if self.bm25_k1 <= 0:
+            raise ValueError("bm25_k1은 0보다 커야 합니다")
+        if not 0 <= self.bm25_b <= 1:
+            raise ValueError("bm25_b는 0 이상 1 이하여야 합니다")
 
     # 파생 경로
     @property

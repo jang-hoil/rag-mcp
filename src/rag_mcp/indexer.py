@@ -15,6 +15,7 @@ from .embeddings import EmbeddingBackend, get_backend
 from .manifest import ManifestStore
 from .models import Chunk, Manifest
 from .request_models import DocumentMetadata, JsonValue
+from .sparse import average_document_length
 from .vector_store import VectorStore
 
 
@@ -79,6 +80,7 @@ class Indexer:
         fiscal_year: int | None = None,
         source_path: str | None = None,
         metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None,
+        avgdl: float | None = None,
     ) -> Manifest:
         """청크 리스트를 색인 (parsed 청크는 이미 추출된 상태로 전달받음).
 
@@ -96,9 +98,15 @@ class Indexer:
         if metadata_payload:
             for c in chunks:
                 c.meta = {**c.meta, **metadata_payload}
+        effective_avgdl = (
+            average_document_length(chunk.text for chunk in chunks)
+            if avgdl is None
+            else avgdl
+        )
         manifest_fields = dict(
             status="parsed", doc_name=doc_name, fiscal_year=fiscal_year,
             source_path=source_path, embedding_model=self.embedding_model,
+            avgdl=effective_avgdl,
             parsed_dir=str(self.config.parsed_doc_dir(document_id)),
         )
         if metadata_payload:
@@ -109,7 +117,12 @@ class Indexer:
         # 임베딩 성공 뒤 Qdrant 교체 전체를 store 잠금 안에서 수행한다.
         try:
             vecs = self.backend.embed_documents([c.text for c in chunks])
-            self.store.replace_document(document_id, chunks, vecs)
+            self.store.replace_document(
+                document_id,
+                chunks,
+                vecs,
+                avgdl=effective_avgdl,
+            )
         except Exception:
             # 색인 실패를 manifest에 남겨 추적 가능하게(기존 데이터는 위에서 보존됨)
             if staged_chunks.exists():
@@ -164,7 +177,7 @@ class Indexer:
             return {"ok": False, "error": f"저장된 청크 없음(parsed 재사용 불가): {document_id}"}
         self.index_chunks(
             document_id, chunks, doc_name=m.doc_name, fiscal_year=m.fiscal_year,
-            source_path=m.source_path,
+            source_path=m.source_path, avgdl=m.avgdl,
         )
         return {"ok": True, "document_id": document_id, "num_chunks": len(chunks), "reparse": False}
 

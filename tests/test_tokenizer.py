@@ -1,6 +1,13 @@
 """tokenizer.py + sparse.py 테스트 (스펙 §10: 코드/금액 토큰 보존)."""
+import pytest
+
 from rag_mcp.tokenizer import tokenize
-from rag_mcp.sparse import to_sparse, token_to_index
+from rag_mcp.sparse import (
+    to_sparse,
+    to_sparse_document,
+    to_sparse_query,
+    token_to_index,
+)
 
 
 def test_code_preserved_as_single_token():
@@ -64,3 +71,38 @@ def test_sparse_values_are_tf():
     idx, val = to_sparse("한도 한도 한도")
     pos = idx.index(token_to_index("한도"))
     assert val[pos] >= 3.0
+
+
+def _value_for(
+    text: str,
+    *,
+    avgdl: float,
+    k1: float = 1.2,
+    b: float = 0.75,
+) -> float:
+    indices, values = to_sparse_document(text, avgdl=avgdl, k1=k1, b=b)
+    return values[indices.index(token_to_index("한도"))]
+
+
+def test_sparse_document_tf_saturates_instead_of_growing_linearly():
+    """문서 TF는 BM25 포화되어 반복 횟수만큼 선형 증가하지 않는다."""
+    once = _value_for("한도", avgdl=10.0)
+    ten = _value_for(" ".join(["한도"] * 10), avgdl=10.0)
+    hundred = _value_for(" ".join(["한도"] * 100), avgdl=10.0)
+
+    assert once < ten < hundred
+    assert hundred < 2.2  # k1 + 1의 이론 상한보다 작아야 한다.
+    assert hundred / ten < 1.2  # 반복을 10배 해도 가중치는 상한에 수렴한다.
+
+
+def test_sparse_document_uses_document_average_length():
+    """동일 TF라도 긴 청크는 문서 평균 길이 정규화로 더 낮은 가중치를 받는다."""
+    short = _value_for("한도 한도", avgdl=20.0)
+    long = _value_for("한도 한도 " + "기타 " * 30, avgdl=20.0)
+    assert long < short
+
+
+def test_sparse_query_keeps_raw_tf_without_bm25_saturation():
+    """질의 벡터는 표준 BM25 비대칭에 따라 raw TF를 유지한다."""
+    indices, values = to_sparse_query("한도 한도 한도")
+    assert values[indices.index(token_to_index("한도"))] == pytest.approx(3.0)
