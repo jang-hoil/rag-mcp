@@ -79,7 +79,10 @@ class SearchResult(BaseModel):
 
     chunk_id: str
     text: str
+    # 최종 반환 순서를 정한 점수. 리랭커가 꺼져 있으면 융합 점수와 같다.
     score: float
+    # Qdrant RRF/DBSF(또는 단일 검색)에서 받은 리랭킹 전 점수.
+    fusion_score: Optional[float] = None
     matched_by: list[str] = Field(default_factory=list)  # ["dense", "sparse"]
     source: SearchSource
 

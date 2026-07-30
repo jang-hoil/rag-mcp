@@ -12,6 +12,7 @@ def _result(
     chunk_id: str,
     text: str,
     *,
+    score: float = 0.5,
     heading_path: list[str] | None = None,
     is_table: bool = False,
     has_amount: bool = False,
@@ -20,7 +21,7 @@ def _result(
     return SearchResult(
         chunk_id=chunk_id,
         text=text,
-        score=0.5,
+        score=score,
         source=SearchSource(
             document_id="d1",
             heading_path=heading_path or [],
@@ -32,10 +33,11 @@ def _result(
 
 
 def test_lexical_reranker_changes_order_using_payload_signals():
-    unrelated = _result("unrelated", "휴가 복무 일반 안내")
+    unrelated = _result("unrelated", "휴가 복무 일반 안내", score=0.9)
     relevant = _result(
         "relevant",
         "201-01 일반수용비 한도 50,000,000원",
+        score=0.3,
         heading_path=["세출예산", "201-01 일반수용비"],
         is_table=True,
         has_amount=True,
@@ -46,6 +48,11 @@ def test_lexical_reranker_changes_order_using_payload_signals():
     reranked = reranker.rerank("201-01 일반수용비 한도 표", [unrelated, relevant])
 
     assert [result.chunk_id for result in reranked] == ["relevant", "unrelated"]
+    assert [result.score for result in reranked] == sorted(
+        (result.score for result in reranked),
+        reverse=True,
+    )
+    assert [result.fusion_score for result in reranked] == [0.3, 0.9]
 
 
 def test_off_reranker_preserves_order_exactly():

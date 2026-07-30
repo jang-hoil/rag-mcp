@@ -240,6 +240,7 @@ class Retriever:
             chunk_id=payload.get("chunk_id", str(p.id)),
             text=payload.get("text", ""),
             score=float(p.score),
+            fusion_score=float(p.score),
             matched_by=matched_by,
             source=_source_from_payload(payload),
         )

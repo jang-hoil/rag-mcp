@@ -80,10 +80,23 @@ class LexicalReranker:
 
     def rerank(self, query: str, results: list[SearchResult]) -> list[SearchResult]:
         query_tokens = set(tokenize(query))
+        rescored = [
+            result.model_copy(
+                update={
+                    "score": self._score(query, query_tokens, result),
+                    "fusion_score": (
+                        result.score
+                        if result.fusion_score is None
+                        else result.fusion_score
+                    ),
+                }
+            )
+            for result in results
+        ]
         # 파이썬 정렬은 안정 정렬이므로 동점이면 기존 융합 순위를 보존한다.
         return sorted(
-            results,
-            key=lambda result: self._score(query, query_tokens, result),
+            rescored,
+            key=lambda result: result.score,
             reverse=True,
         )
 
@@ -131,7 +144,19 @@ class CrossEncoderReranker:
             key=lambda item: float(item[1]),
             reverse=True,
         )
-        return [result for result, _ in ranked]
+        return [
+            result.model_copy(
+                update={
+                    "score": float(score),
+                    "fusion_score": (
+                        result.score
+                        if result.fusion_score is None
+                        else result.fusion_score
+                    ),
+                }
+            )
+            for result, score in ranked
+        ]
 
 
 def build_reranker(config: Config) -> Reranker:
