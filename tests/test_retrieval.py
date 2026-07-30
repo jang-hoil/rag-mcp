@@ -8,6 +8,7 @@ from rag_mcp.indexer import Indexer
 from rag_mcp.models import Chunk
 from rag_mcp.retrieval import Retriever
 from rag_mcp.vector_store import VectorStore
+from qdrant_client.models import ScoredPoint
 
 
 @pytest.fixture
@@ -106,3 +107,81 @@ def test_get_chunk(env):
     assert r is not None
     assert r.chunk_id == "d1::c0"
     assert "201-01" in r.text
+
+
+class _ThresholdStore:
+    def __init__(self, points, dense_scores):
+        self.points = points
+        self.dense_scores = dense_scores
+
+    def require_collection(self):
+        return None
+
+    def query(self, *args, **kwargs):
+        return self.points
+
+    def dense_scores_for_points(self, dense_vec, point_ids):
+        return {point_id: self.dense_scores[point_id] for point_id in point_ids}
+
+
+def _point(point_id: int, chunk_id: str, score: float) -> ScoredPoint:
+    return ScoredPoint(
+        id=point_id,
+        version=0,
+        score=score,
+        payload={"chunk_id": chunk_id, "document_id": "d1", "text": chunk_id},
+    )
+
+
+def test_dense_absolute_threshold_uses_separate_cosine_score(fake_backend):
+    """하이브리드 RRF 점수가 아니라 별도 dense 코사인 점수로 후보를 거른다."""
+    points = [_point(1, "d1::first", 0.6667), _point(2, "d1::second", 0.5)]
+    store = _ThresholdStore(points, {1: 0.69, 2: 0.91})
+    retriever = Retriever(
+        Config(min_dense_score=0.7),
+        document_id="d1",
+        backend=fake_backend,
+        store=store,
+    )
+
+    outcome = retriever.search_with_diagnostics("질의", search_mode="hybrid")
+
+    assert [result.chunk_id for result in outcome.results] == ["d1::second"]
+    assert outcome.candidates_before_filter == 2
+    assert outcome.filtered_by_dense == 1
+
+
+def test_relative_score_ratio_filters_large_rank_drop(fake_backend):
+    points = [_point(1, "d1::first", 1.0), _point(2, "d1::second", 0.59)]
+    store = _ThresholdStore(points, {1: 0.8, 2: 0.8})
+    retriever = Retriever(
+        Config(rel_score_ratio=0.6),
+        document_id="d1",
+        backend=fake_backend,
+        store=store,
+    )
+
+    outcome = retriever.search_with_diagnostics("질의", search_mode="hybrid")
+
+    assert [result.chunk_id for result in outcome.results] == ["d1::first"]
+    assert outcome.filtered_by_relative == 1
+
+
+def test_threshold_defaults_preserve_all_candidates_and_order(fake_backend):
+    points = [_point(1, "d1::first", 0.6667), _point(2, "d1::second", 0.5)]
+    store = _ThresholdStore(points, {1: 0.01, 2: 0.99})
+    retriever = Retriever(
+        Config(),
+        document_id="d1",
+        backend=fake_backend,
+        store=store,
+    )
+
+    outcome = retriever.search_with_diagnostics("질의", search_mode="hybrid")
+
+    assert [result.chunk_id for result in outcome.results] == [
+        "d1::first",
+        "d1::second",
+    ]
+    assert outcome.filtered_by_dense == 0
+    assert outcome.filtered_by_relative == 0

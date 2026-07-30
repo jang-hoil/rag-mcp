@@ -102,6 +102,20 @@ def test_bm25_defaults_and_environment_overrides(monkeypatch):
     assert configured.bm25_b == pytest.approx(0.4)
 
 
+def test_relevance_threshold_defaults_and_environment_overrides(monkeypatch):
+    monkeypatch.delenv("RAG_MIN_DENSE_SCORE", raising=False)
+    monkeypatch.delenv("RAG_REL_SCORE_RATIO", raising=False)
+    defaults = Config()
+    assert defaults.min_dense_score == 0.0
+    assert defaults.rel_score_ratio == 0.0
+
+    monkeypatch.setenv("RAG_MIN_DENSE_SCORE", "0.72")
+    monkeypatch.setenv("RAG_REL_SCORE_RATIO", "0.65")
+    configured = Config()
+    assert configured.min_dense_score == pytest.approx(0.72)
+    assert configured.rel_score_ratio == pytest.approx(0.65)
+
+
 def test_invalid_qdrant_mode_fails_before_store_open():
     with pytest.raises(ValueError, match="local|server"):
         Config(qdrant_mode="sever")

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Mapping
+import math
 import uuid
 
 from qdrant_client import QdrantClient, models
@@ -364,6 +365,45 @@ class VectorStore:
                 limit=top_k,
                 with_payload=True,
             ).points
+
+    def dense_scores_for_points(
+        self,
+        dense_vec: list[float],
+        point_ids: list[str | int],
+    ) -> dict[str | int, float]:
+        """후보 포인트의 dense 벡터를 읽어 코사인 유사도를 별도로 계산한다.
+
+        하이브리드 RRF/DBSF 점수는 절대 관련도가 아니므로 dense 임계값에 재사용하지 않는다.
+        """
+        if not point_ids:
+            return {}
+        with self._lock:
+            records = self.client.retrieve(
+                collection_name=self.collection,
+                ids=point_ids,
+                with_payload=False,
+                with_vectors=True,
+            )
+
+        query_norm = math.sqrt(sum(value * value for value in dense_vec))
+        if query_norm == 0:
+            return {record.id: 0.0 for record in records}
+
+        scores: dict[str | int, float] = {}
+        for record in records:
+            vectors = record.vector or {}
+            vector = vectors.get("dense") if isinstance(vectors, dict) else vectors
+            if vector is None or len(vector) != len(dense_vec):
+                continue
+            vector_norm = math.sqrt(sum(value * value for value in vector))
+            score = (
+                sum(left * right for left, right in zip(dense_vec, vector))
+                / (query_norm * vector_norm)
+                if vector_norm
+                else 0.0
+            )
+            scores[record.id] = float(score)
+        return scores
 
     def retrieve_chunk(self, chunk_id: str):
         """chunk_id 단건 조회 (point id는 chunk_id의 uuid5). 없으면 None."""

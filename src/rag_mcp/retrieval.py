@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 from qdrant_client.models import ScoredPoint
 
@@ -17,6 +18,16 @@ from .models import SearchResult, SearchSource
 from .request_models import FilterValue
 from .sparse import to_sparse_query
 from .vector_store import VectorStore
+
+
+@dataclass(frozen=True)
+class SearchOutcome:
+    """임계값 적용 결과와 필터 전후 진단 수치."""
+
+    results: list[SearchResult]
+    candidates_before_filter: int
+    filtered_by_dense: int
+    filtered_by_relative: int
 
 
 def _source_from_payload(payload: dict) -> SearchSource:
@@ -69,6 +80,24 @@ class Retriever:
         fiscal_year: int | None = None,
         filters: Mapping[str, FilterValue] | None = None,
     ) -> list[SearchResult]:
+        return self.search_with_diagnostics(
+            query,
+            top_k=top_k,
+            search_mode=search_mode,
+            fusion=fusion,
+            fiscal_year=fiscal_year,
+            filters=filters,
+        ).results
+
+    def search_with_diagnostics(
+        self,
+        query: str,
+        top_k: int = 8,
+        search_mode: str = "hybrid",
+        fusion: str = "rrf",
+        fiscal_year: int | None = None,
+        filters: Mapping[str, FilterValue] | None = None,
+    ) -> SearchOutcome:
         # 컬렉션이 없는 미이관 문서는 KURE 연산 전에 명확히 실패시킨다.
         self.store.require_collection()
         dense_vec = None
@@ -83,7 +112,49 @@ class Retriever:
             dense_vec, sparse_vec, top_k=top_k, search_mode=search_mode,
             fusion=fusion, fiscal_year=fiscal_year, filters=filters,
         )
-        return [self._to_result(p, search_mode, q_sparse_idx) for p in points]
+        candidates_before_filter = len(points)
+        min_dense_score = self.config.min_dense_score
+        rel_score_ratio = self.config.rel_score_ratio
+
+        dense_scores: dict[str | int, float] = {}
+        if min_dense_score > 0 and search_mode in ("dense", "hybrid"):
+            if search_mode == "dense":
+                dense_scores = {point.id: float(point.score) for point in points}
+            else:
+                dense_scores = self.store.dense_scores_for_points(
+                    dense_vec or [],
+                    [point.id for point in points],
+                )
+
+        top_fusion_score = float(points[0].score) if points else 0.0
+        kept: list[ScoredPoint] = []
+        filtered_by_dense = 0
+        filtered_by_relative = 0
+        for point in points:
+            if (
+                min_dense_score > 0
+                and search_mode in ("dense", "hybrid")
+                and dense_scores.get(point.id, -1.0) < min_dense_score
+            ):
+                filtered_by_dense += 1
+                continue
+            if (
+                rel_score_ratio > 0
+                and float(point.score) < top_fusion_score * rel_score_ratio
+            ):
+                filtered_by_relative += 1
+                continue
+            kept.append(point)
+
+        return SearchOutcome(
+            results=[
+                self._to_result(point, search_mode, q_sparse_idx)
+                for point in kept
+            ],
+            candidates_before_filter=candidates_before_filter,
+            filtered_by_dense=filtered_by_dense,
+            filtered_by_relative=filtered_by_relative,
+        )
 
     def _to_result(self, p: ScoredPoint, search_mode: str, q_sparse_idx: set[int]) -> SearchResult:
         payload = p.payload or {}

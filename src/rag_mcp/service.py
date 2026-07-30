@@ -215,11 +215,33 @@ class RagService:
                 f"문서 '{document_id}'는 매니페스트는 있지만 문서별 Qdrant 컬렉션이 아직 없습니다. "
                 "scripts/migrate_to_per_doc_collections.py로 이관하거나 문서를 다시 색인하세요."
             )
-        results = retriever.search(
+        outcome = retriever.search_with_diagnostics(
             query, top_k=top_k, search_mode=search_mode, fusion=fusion,
             fiscal_year=fiscal_year, filters=parsed_filters.to_qdrant(),
         )
-        return [r.model_dump() for r in results]
+        if (
+            not outcome.results
+            and outcome.candidates_before_filter > 0
+            and (outcome.filtered_by_dense or outcome.filtered_by_relative)
+        ):
+            thresholds = {}
+            if self.config.min_dense_score > 0 and search_mode in ("dense", "hybrid"):
+                thresholds["min_dense_score"] = self.config.min_dense_score
+            if self.config.rel_score_ratio > 0:
+                thresholds["rel_score_ratio"] = self.config.rel_score_ratio
+            return [{
+                "diagnostic": {
+                    "message": (
+                        "검색 후보가 관련도 임계값을 통과하지 못해 결과를 반환하지 않았습니다. "
+                        "빈 색인이나 검색 오류가 아니라 무관한 근거 사용을 막기 위한 필터링입니다."
+                    ),
+                    "candidates_before_filter": outcome.candidates_before_filter,
+                    "filtered_by_dense": outcome.filtered_by_dense,
+                    "filtered_by_relative": outcome.filtered_by_relative,
+                    "thresholds": thresholds,
+                }
+            }]
+        return [result.model_dump() for result in outcome.results]
 
     def get_chunk(self, chunk_id: str, embedding_model: str | None = None) -> dict:
         model = embedding_model or self.config.embedding_model

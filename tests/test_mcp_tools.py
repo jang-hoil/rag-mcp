@@ -304,6 +304,33 @@ def test_search_accepts_allowed_filter_key(svc):
     assert all(r["source"]["is_table"] for r in results)
 
 
+def test_search_returns_korean_diagnostic_when_thresholds_remove_all(svc, monkeypatch):
+    """임계값으로 전부 제거되면 빈 배열 대신 원인을 설명하는 진단을 반환한다."""
+    from rag_mcp.retrieval import SearchOutcome
+
+    _seed(svc)
+    svc.config.min_dense_score = 0.9
+    retriever = svc._retriever("kure", "d1")
+    monkeypatch.setattr(
+        retriever,
+        "search_with_diagnostics",
+        lambda *args, **kwargs: SearchOutcome(
+            results=[],
+            candidates_before_filter=2,
+            filtered_by_dense=2,
+            filtered_by_relative=0,
+        ),
+    )
+
+    response = svc.search_documents("무관한 질의", document_id="d1")
+
+    assert len(response) == 1
+    diagnostic = response[0]["diagnostic"]
+    assert "임계값" in diagnostic["message"]
+    assert diagnostic["candidates_before_filter"] == 2
+    assert diagnostic["thresholds"]["min_dense_score"] == pytest.approx(0.9)
+
+
 def test_metadata_stored_and_shown(svc):
     # metadata가 청크에 저장되고 검색 결과 source.meta로 노출되는지
     chunks = [Chunk(chunk_id="m1::c0", document_id="m1", text="201-01 일반수용비 한도", fiscal_year=2026)]

@@ -71,6 +71,13 @@ class Config:
     # 문서 sparse 벡터의 BM25 TF 포화 계수. 질의 벡터에는 적용하지 않는다.
     bm25_k1: float = field(default_factory=lambda: float(_env("RAG_BM25_K1", "1.2")))
     bm25_b: float = field(default_factory=lambda: float(_env("RAG_BM25_B", "0.75")))
+    # 검색 관련도 게이트. 0은 비활성으로 기존 검색 동작을 보존한다.
+    min_dense_score: float = field(
+        default_factory=lambda: float(_env("RAG_MIN_DENSE_SCORE", "0"))
+    )
+    rel_score_ratio: float = field(
+        default_factory=lambda: float(_env("RAG_REL_SCORE_RATIO", "0"))
+    )
 
     def __post_init__(self) -> None:
         if self.qdrant_mode not in {"local", "server"}:
@@ -84,6 +91,10 @@ class Config:
             raise ValueError("bm25_k1은 0보다 커야 합니다")
         if not 0 <= self.bm25_b <= 1:
             raise ValueError("bm25_b는 0 이상 1 이하여야 합니다")
+        if not 0 <= self.min_dense_score <= 1:
+            raise ValueError("min_dense_score는 0 이상 1 이하여야 합니다")
+        if not 0 <= self.rel_score_ratio <= 1:
+            raise ValueError("rel_score_ratio는 0 이상 1 이하여야 합니다")
 
     # 파생 경로
     @property
