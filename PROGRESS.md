@@ -53,6 +53,11 @@
   유사도를 사용한다. 상대 낙폭은 1위 융합 점수의 비율로 적용한다.
 - 임계값으로 후보가 전부 제거되면 빈 배열 대신 필터 전 후보 수와 적용값을 담은
   한국어 `diagnostic`을 반환한다.
+- 항목 2(리랭커): `RAG_RERANKER=off|lexical|cross` 교체 인터페이스와
+  `rerank.py`를 추가했다. 기본 `off`는 기존 순서를 유지한다. `lexical`은 Kiwi
+  토큰 겹침, heading, 표·금액·코드 의도, 청크 길이를 설정 가능한 가중치로 결합한다.
+- `cross`는 `RAG_CROSS_RERANKER_MODEL`의 로컬 경로만 사용하며 모델 부재 시
+  자동 다운로드 없이 한국어 오류를 낸다. 기본 경로는 추가 메모리를 사용하지 않는다.
 - 저장값이 바뀌지만 이번 작업에서는 **재색인하지 않는다.** 현재 3개 문서 1,077청크는
   기존 sparse 값을 유지하며, 신규 색인부터 새 BM25 값이 적용된다.
 - 항목 1(문장 경계 청킹)도 청크 경계를 바꾸므로 완료 뒤 신규 색인과 기존 색인의
@@ -215,7 +220,7 @@
 ## 구현된 모듈 지도 (참고)
 - `config.py` 모델별 컬렉션/차원 · `models.py` Chunk/SearchResult/Manifest
 - `tokenizer.py`(코드/금액 보존)+`sparse.py`(blake2b idx, tf, IDF modifier 전제)
-- `embeddings.py`(KURE lazy) · `vector_store.py`(dense+sparse, 각 Prefetch.filter)
+- `embeddings.py`(KURE lazy) · `rerank.py`(off/lexical/cross) · `vector_store.py`(dense+sparse, 각 Prefetch.filter)
 - `manifest.py`(atomic·멱등) · `indexer.py`(chunks.jsonl·reindex) · `retrieval.py`(search/get_chunk)
 - `jobs.py`(비동기 ingest job·JobStore) · `service.py`(도구 9개 로직·submit_ingest/ingest_status·review_before_ingest)
 - `server.py`(FastMCP, async+anyio.to_thread) · `cli.py`(동기 ingest 유지)

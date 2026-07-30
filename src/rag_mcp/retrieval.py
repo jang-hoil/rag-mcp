@@ -15,6 +15,7 @@ from qdrant_client.models import ScoredPoint
 from .config import Config
 from .embeddings import EmbeddingBackend, get_backend
 from .models import SearchResult, SearchSource
+from .rerank import build_reranker
 from .request_models import FilterValue
 from .sparse import to_sparse_query
 from .vector_store import VectorStore
@@ -108,8 +109,13 @@ class Retriever:
             sparse_vec = to_sparse_query(query)
 
         q_sparse_idx = set(sparse_vec[0]) if sparse_vec else set()
+        candidate_k = (
+            max(top_k, self.config.rerank_fetch_k)
+            if self.config.reranker != "off"
+            else top_k
+        )
         points = self.store.query(
-            dense_vec, sparse_vec, top_k=top_k, search_mode=search_mode,
+            dense_vec, sparse_vec, top_k=candidate_k, search_mode=search_mode,
             fusion=fusion, fiscal_year=fiscal_year, filters=filters,
         )
         candidates_before_filter = len(points)
@@ -146,11 +152,13 @@ class Retriever:
                 continue
             kept.append(point)
 
+        converted = [
+            self._to_result(point, search_mode, q_sparse_idx)
+            for point in kept
+        ]
+        reranked = build_reranker(self.config).rerank(query, converted)[:top_k]
         return SearchOutcome(
-            results=[
-                self._to_result(point, search_mode, q_sparse_idx)
-                for point in kept
-            ],
+            results=reranked,
             candidates_before_filter=candidates_before_filter,
             filtered_by_dense=filtered_by_dense,
             filtered_by_relative=filtered_by_relative,

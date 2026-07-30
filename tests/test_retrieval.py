@@ -185,3 +185,32 @@ def test_threshold_defaults_preserve_all_candidates_and_order(fake_backend):
     ]
     assert outcome.filtered_by_dense == 0
     assert outcome.filtered_by_relative == 0
+
+
+def test_lexical_reranker_promotes_relevant_candidate_from_wider_pool(fake_backend):
+    points = [
+        _point(1, "무관한 후보", 0.6667),
+        ScoredPoint(
+            id=2,
+            version=0,
+            score=0.5,
+            payload={
+                "chunk_id": "d1::relevant",
+                "document_id": "d1",
+                "text": "201-01 일반수용비 한도",
+                "heading_path": ["201-01 일반수용비"],
+                "has_code": True,
+            },
+        ),
+    ]
+    store = _ThresholdStore(points, {1: 0.8, 2: 0.8})
+    retriever = Retriever(
+        Config(reranker="lexical", rerank_fetch_k=5),
+        document_id="d1",
+        backend=fake_backend,
+        store=store,
+    )
+
+    outcome = retriever.search_with_diagnostics("201-01 한도", top_k=1)
+
+    assert [result.chunk_id for result in outcome.results] == ["d1::relevant"]

@@ -78,6 +78,32 @@ class Config:
     rel_score_ratio: float = field(
         default_factory=lambda: float(_env("RAG_REL_SCORE_RATIO", "0"))
     )
+    # 검색 후 리랭커. 기본 off는 기존 순서와 후보 수를 그대로 유지한다.
+    reranker: str = field(default_factory=lambda: _env("RAG_RERANKER", "off"))
+    rerank_fetch_k: int = field(
+        default_factory=lambda: int(_env("RAG_RERANK_FETCH_K", "30"))
+    )
+    cross_reranker_model: str = field(
+        default_factory=lambda: _env("RAG_CROSS_RERANKER_MODEL", "")
+    )
+    rerank_lexical_weight: float = field(
+        default_factory=lambda: float(_env("RAG_RERANK_LEXICAL_WEIGHT", "1.0"))
+    )
+    rerank_heading_weight: float = field(
+        default_factory=lambda: float(_env("RAG_RERANK_HEADING_WEIGHT", "0.5"))
+    )
+    rerank_table_weight: float = field(
+        default_factory=lambda: float(_env("RAG_RERANK_TABLE_WEIGHT", "0.2"))
+    )
+    rerank_amount_weight: float = field(
+        default_factory=lambda: float(_env("RAG_RERANK_AMOUNT_WEIGHT", "0.3"))
+    )
+    rerank_code_weight: float = field(
+        default_factory=lambda: float(_env("RAG_RERANK_CODE_WEIGHT", "0.4"))
+    )
+    rerank_length_weight: float = field(
+        default_factory=lambda: float(_env("RAG_RERANK_LENGTH_WEIGHT", "0.05"))
+    )
 
     def __post_init__(self) -> None:
         if self.qdrant_mode not in {"local", "server"}:
@@ -95,6 +121,20 @@ class Config:
             raise ValueError("min_dense_score는 0 이상 1 이하여야 합니다")
         if not 0 <= self.rel_score_ratio <= 1:
             raise ValueError("rel_score_ratio는 0 이상 1 이하여야 합니다")
+        if self.reranker not in {"off", "lexical", "cross"}:
+            raise ValueError("reranker는 off|lexical|cross여야 합니다")
+        if not 1 <= self.rerank_fetch_k <= 100:
+            raise ValueError("rerank_fetch_k는 1 이상 100 이하여야 합니다")
+        rerank_weights = (
+            self.rerank_lexical_weight,
+            self.rerank_heading_weight,
+            self.rerank_table_weight,
+            self.rerank_amount_weight,
+            self.rerank_code_weight,
+            self.rerank_length_weight,
+        )
+        if any(weight < 0 for weight in rerank_weights):
+            raise ValueError("리랭커 가중치는 0 이상이어야 합니다")
 
     # 파생 경로
     @property

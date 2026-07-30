@@ -116,6 +116,22 @@ def test_relevance_threshold_defaults_and_environment_overrides(monkeypatch):
     assert configured.rel_score_ratio == pytest.approx(0.65)
 
 
+def test_reranker_defaults_and_environment_overrides(monkeypatch):
+    monkeypatch.delenv("RAG_RERANKER", raising=False)
+    monkeypatch.delenv("RAG_RERANK_FETCH_K", raising=False)
+    defaults = Config()
+    assert defaults.reranker == "off"
+    assert defaults.rerank_fetch_k == 30
+
+    monkeypatch.setenv("RAG_RERANKER", "lexical")
+    monkeypatch.setenv("RAG_RERANK_FETCH_K", "40")
+    monkeypatch.setenv("RAG_RERANK_LEXICAL_WEIGHT", "1.5")
+    configured = Config()
+    assert configured.reranker == "lexical"
+    assert configured.rerank_fetch_k == 40
+    assert configured.rerank_lexical_weight == pytest.approx(1.5)
+
+
 def test_invalid_qdrant_mode_fails_before_store_open():
     with pytest.raises(ValueError, match="local|server"):
         Config(qdrant_mode="sever")

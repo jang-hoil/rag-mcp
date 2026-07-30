@@ -485,6 +485,15 @@ Claude Desktop 중심으로 사용할 때는 자주 쓰지 않아도 되지만, 
 | `RAG_BM25_B` | `0.75` | 문서 sparse 청크 길이 정규화 강도(0~1) |
 | `RAG_MIN_DENSE_SCORE` | `0` | dense·hybrid 후보의 최소 코사인 유사도. `0`은 비활성 |
 | `RAG_REL_SCORE_RATIO` | `0` | 1위 융합 점수 대비 최소 비율. `0`은 비활성 |
+| `RAG_RERANKER` | `off` | `off`, 모델 없는 `lexical`, 로컬 모델 전용 `cross` |
+| `RAG_RERANK_FETCH_K` | `30` | 리랭커에 넘길 융합 후보 수(1~100) |
+| `RAG_CROSS_RERANKER_MODEL` | 없음 | `cross`에서만 쓰는 로컬 모델 경로. 자동 다운로드 안 함 |
+| `RAG_RERANK_LEXICAL_WEIGHT` | `1.0` | 질의·본문 Kiwi 토큰 겹침 가중치 |
+| `RAG_RERANK_HEADING_WEIGHT` | `0.5` | 질의·제목 경로 토큰 겹침 가중치 |
+| `RAG_RERANK_TABLE_WEIGHT` | `0.2` | 표 의도와 `is_table` 일치 가중치 |
+| `RAG_RERANK_AMOUNT_WEIGHT` | `0.3` | 금액 의도와 `has_amount` 일치 가중치 |
+| `RAG_RERANK_CODE_WEIGHT` | `0.4` | 코드 의도와 `has_code` 일치 가중치 |
+| `RAG_RERANK_LENGTH_WEIGHT` | `0.05` | 짧고 집중된 청크 선호 가중치 |
 | `RAG_HF_OFFLINE` | `1` | `1`이면 임베딩 모델을 로컬 캐시에서만 로드(HF 네트워크 조회 차단). 정부망 등에서 검색이 멈추는 것을 막는다. 모델을 처음 받을 때만 `0`으로 두고 1회 다운로드 |
 | `RAG_RENDER_DPI` | `200` | 표/페이지 이미지 렌더 DPI |
 | `RAG_OCR` | `auto` | `off`, `auto`, `force` |
@@ -514,6 +523,14 @@ Qdrant 컬렉션은 임베딩 모델과 문서별로 분리됩니다. 이름은
 `RAG_REL_SCORE_RATIO`는 검색 방식과 관계없이 1위 융합 점수 대비 큰 낙폭을 제거합니다.
 임계값 때문에 후보가 모두 제거되면 빈 배열 대신 필터 전 후보 수, 적용 임계값,
 제거 원인을 담은 한국어 `diagnostic`을 반환합니다.
+
+리랭커도 기본값은 `off`라 기존 융합 순서와 후보 수를 그대로 보존합니다.
+`lexical`은 새 모델 없이 질의·본문·제목의 Kiwi 토큰 겹침, 표·금액·코드 의도,
+청크 길이를 선형 결합해 `RAG_RERANK_FETCH_K` 후보를 재정렬합니다. dense와 sparse
+점수를 직접 더하지 않고, Qdrant의 RRF/DBSF 융합 결과 뒤에서만 동작합니다.
+`cross`는 선택 기능이며 `RAG_CROSS_RERANKER_MODEL`에 이미 존재하는 로컬 모델
+경로를 지정해야 합니다. 경로가 없거나 모델을 열 수 없으면 한국어 오류를 내고
+네트워크 다운로드는 시도하지 않습니다.
 
 `RAG_QDRANT_PATH`를 지정하지 않으면 저장 경로는 `<RAG_DATA_DIR>/qdrant`로 자동 결정됩니다. 한 서버 프로세스 안에서는 문서별 저장소가 같은 Qdrant 클라이언트 락을 공유하므로, 색인 중 검색·목록 조회가 들어와도 local 저장소 접근은 순서대로 실행됩니다. `ingest_pdf`는 전달한 PDF를 매번 새로 파싱한 뒤 색인하므로, 같은 경로의 변환 캐시가 남아 있어도 최신 PDF 내용으로 갱신됩니다. 색인 중에는 다른 변경 작업(`ingest_pdf`, `ingest_chunks`, `delete_document`, `reindex_document`)이 실행되지 않으며, 해당 도구는 현재 작업이 끝난 뒤 다시 시도하라는 `status="busy"` 응답을 반환합니다. 검색·조회 도구는 계속 사용할 수 있습니다.
 
