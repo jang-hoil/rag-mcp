@@ -47,7 +47,11 @@ Claude: 2026년 공직윤리 실무과정 351쪽에 이렇게 나와 있습니�
 
 ### 1. 도구 3개 설치
 
-새 **cmd 창**을 열고:
+**cmd 창**을 엽니다. 윈도우 키를 누르고 `cmd`를 입력한 뒤 Enter를 치면 검은 창이 뜹니다.
+
+> 이 문서의 명령은 **cmd 기준**입니다. PowerShell(파란 창)에서는 일부 명령이 동작하지 않습니다.
+
+여기에 아래를 한 줄씩 붙여넣으세요.
 
 ```bat
 winget install --id Git.Git -e
@@ -90,7 +94,7 @@ RAG MCP\
 
 ### 5. Claude Desktop에 연결
 
-설정에 넣을 경로가 **두 개** 필요합니다. 2번에서 쓰던 cmd 창에 아래를 차례로 쳐서 확인하세요.
+설정에 넣을 경로가 **두 개** 필요합니다. 2번에서 쓰던 cmd 창에서 확인하세요.
 
 **첫 번째 — uv.exe 경로**
 
@@ -106,20 +110,19 @@ C:\Users\Owner\AppData\Local\Programs\Python\Python311\Scripts\uv.exe
 
 **두 번째 — RAG MCP 폴더 경로**
 
-```bat
-cd
-```
-
-화면에 나온 줄이 그 경로입니다.
+명령을 칠 필요도 없습니다. **커서 왼쪽에 이미 적혀 있습니다.**
 
 ```text
-C:\Users\Owner\Desktop\RAG MCP
+C:\Users\Owner\Desktop\RAG MCP>
+└────────── 이 부분 ──────────┘
 ```
 
-> `cd` 뒤에 아무것도 붙이지 않으면 **지금 있는 폴더가 어디인지** 알려줍니다.
-> 2번에서 `cd "RAG MCP"`로 이미 이 폴더에 들어와 있으므로, 그게 곧 RAG MCP 폴더 경로입니다.
->
-> cmd 창을 닫았다면 다시 열고 `cd /d "%USERPROFILE%\Desktop\RAG MCP"`를 실행한 뒤 `cd`를 치세요.
+2번에서 `cd "RAG MCP"`로 이 폴더에 들어왔기 때문입니다. `>` 앞까지를 복사하세요.
+
+> 창을 닫았다면 다시 열고 아래를 실행하면 됩니다.
+> ```bat
+> cd /d "%USERPROFILE%\Desktop\RAG MCP"
+> ```
 > 파일 탐색기 주소창을 클릭해 복사해도 됩니다.
 
 이제 Claude Desktop → **Settings → Developer → Edit Config**를 열고 아래를 붙여넣습니다. **경로 두 곳만** 방금 확인한 값으로 바꾸세요.
