@@ -59,6 +59,14 @@ class Config:
     qdrant_url: str = field(default_factory=lambda: _env("RAG_QDRANT_URL", ""))
     embedding_model: str = field(default_factory=lambda: _env("RAG_EMBEDDING_MODEL", "kure"))
     render_dpi: int = field(default_factory=lambda: int(_env("RAG_RENDER_DPI", "200")))
+    # MCP 화면 확인은 색인용 200dpi보다 낮은 144dpi면 한글 본문을 읽으면서 전송량을 줄일 수 있다.
+    page_image_dpi: int = field(
+        default_factory=lambda: int(_env("RAG_PAGE_IMAGE_DPI", "144"))
+    )
+    # 전체 페이지를 base64로 실을 때 응답이 커지지 않도록 전송 이미지 가로폭을 제한한다.
+    page_image_max_width: int = field(
+        default_factory=lambda: int(_env("RAG_PAGE_IMAGE_MAX_WIDTH", "1600"))
+    )
     # OCR: off | auto(스캔 PDF hybrid 후보·needs_image 구간) | force(needs_image 전부)
     ocr_mode: str = field(default_factory=lambda: _env("RAG_OCR", "auto"))
     ocr_min_chars_per_page: int = field(
@@ -117,6 +125,10 @@ class Config:
                 f"알 수 없는 임베딩 모델: {self.embedding_model} "
                 f"(가능: {list(COLLECTION_BY_MODEL)})"
             )
+        if not 72 <= self.page_image_dpi <= 300:
+            raise ValueError("page_image_dpi는 72 이상 300 이하여야 합니다")
+        if not 320 <= self.page_image_max_width <= 4096:
+            raise ValueError("page_image_max_width는 320 이상 4096 이하여야 합니다")
         if self.bm25_k1 <= 0:
             raise ValueError("bm25_k1은 0보다 커야 합니다")
         if not 0 <= self.bm25_b <= 1:

@@ -1,4 +1,4 @@
-"""RAG 서비스 계층 — MCP 도구 7개의 비즈니스 로직. 스펙 §5.
+"""RAG 서비스 계층 — MCP 도구 10개의 비즈니스 로직. 스펙 §5.
 
 server.py(FastMCP)·cli.py·테스트가 공통으로 사용한다(MCP 프레임워크 비의존).
 embedding_model이 컬렉션을 결정(저장·검색 모델 일치 강제 — 스펙 §11).
@@ -9,6 +9,7 @@ import re
 import threading
 import uuid
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Optional
 
@@ -18,12 +19,20 @@ from .indexer import Indexer
 from .jobs import JobStore
 from .manifest import ManifestStore
 from .models import Chunk
+from .page_render import render_pages
 from .request_models import DocumentMetadata, JsonValue, SearchFilters
 from .retrieval import Retriever
 from .vector_store import VectorStore, open_qdrant_client
 
 # 검색 상한 (MCP는 LLM이 인자를 채우므로 과도한 limit 방어)
 _MAX_TOP_K = 100
+# 한 번의 MCP 응답에 넣을 수 있는 페이지 수. 이미지 base64 전송량을 제한한다.
+_MAX_PAGE_IMAGES = 5
+# 화면 확인용 DPI 범위. 너무 낮으면 한글을 읽기 어렵고 너무 높으면 렌더·전송량이 급증한다.
+_MIN_PAGE_IMAGE_DPI = 72
+_MAX_PAGE_IMAGE_DPI = 300
+# 문서 스캔/전체 페이지는 PNG보다 JPEG가 훨씬 작다. 82는 글자 가독성과 용량의 절충값이다.
+_PAGE_IMAGE_JPEG_QUALITY = 82
 # filters로 허용하는 payload 키 (임의 키 주입 방지 — Chunk.payload 필드 중 필터 의미 있는 것)
 _ALLOWED_FILTER_KEYS = frozenset(
     {"fiscal_year", "document_id", "doc_name", "is_table", "has_amount", "has_code", "needs_image", "page"}
@@ -39,6 +48,56 @@ def _fiscal_year_from_filename(stem: str) -> Optional[int]:
     """파일명 stem에서 연도를 추출. 여러 개면 마지막(파일명 끝의 연도 관례). 없으면 None."""
     matches = _FILENAME_YEAR_RE.findall(stem)
     return int(matches[-1]) if matches else None
+
+
+def _normalize_page_numbers(pages: int | list[int]) -> list[int]:
+    """단일 정수나 목록을 중복 없는 페이지 목록으로 정규화한다."""
+    if isinstance(pages, bool):
+        values = [pages]
+    elif isinstance(pages, int):
+        values = [pages]
+    elif isinstance(pages, list):
+        values = pages
+    else:
+        raise ValueError("pages는 페이지 번호 정수 또는 정수 목록이어야 합니다")
+
+    if not values:
+        raise ValueError("pages에는 한 쪽 이상의 페이지 번호가 필요합니다")
+    if any(isinstance(page, bool) or not isinstance(page, int) or page < 1 for page in values):
+        raise ValueError("페이지 번호는 1 이상의 정수여야 합니다")
+
+    normalized = list(dict.fromkeys(values))
+    if len(normalized) > _MAX_PAGE_IMAGES:
+        raise ValueError(
+            f"페이지 이미지는 한 번에 최대 {_MAX_PAGE_IMAGES}쪽까지 요청할 수 있습니다"
+        )
+    return normalized
+
+
+def _page_image_bytes(path: Path, max_width: int) -> tuple[bytes, int, int]:
+    """캐시 PNG를 가로폭 제한 JPEG 바이트로 변환한다."""
+    import fitz
+
+    try:
+        pixmap = fitz.Pixmap(str(path))
+    except Exception as exc:
+        raise ValueError(f"페이지 이미지 캐시를 읽을 수 없습니다: {path}") from exc
+
+    # JPEG는 알파 채널을 지원하지 않는다. 원본 PNG 캐시는 OCR·경로 호환을 위해 그대로 둔다.
+    if pixmap.alpha:
+        pixmap = fitz.Pixmap(pixmap, 0)
+    if pixmap.colorspace is None or pixmap.colorspace.n not in {1, 3}:
+        pixmap = fitz.Pixmap(fitz.csRGB, pixmap)
+
+    if pixmap.width > max_width:
+        height = max(1, round(pixmap.height * max_width / pixmap.width))
+        pixmap = fitz.Pixmap(pixmap, max_width, height)
+
+    return (
+        pixmap.tobytes("jpeg", jpg_quality=_PAGE_IMAGE_JPEG_QUALITY),
+        pixmap.width,
+        pixmap.height,
+    )
 
 
 class RagService:
@@ -264,6 +323,111 @@ class RagService:
         if r is None:
             return {"ok": False, "error": f"청크 없음: {chunk_id}"}
         return {"ok": True, **r.model_dump()}
+
+    def get_page_image(
+        self,
+        document_id: str,
+        pages: int | list[int],
+        dpi: int | None = None,
+    ) -> list[dict]:
+        """페이지 캐시를 우선 사용하고, 빠진 페이지만 원본 PDF에서 렌더한다."""
+        page_numbers = _normalize_page_numbers(pages)
+        effective_dpi = self.config.page_image_dpi if dpi is None else dpi
+        if (
+            isinstance(effective_dpi, bool)
+            or not isinstance(effective_dpi, int)
+            or not _MIN_PAGE_IMAGE_DPI <= effective_dpi <= _MAX_PAGE_IMAGE_DPI
+        ):
+            raise ValueError(
+                f"dpi는 {_MIN_PAGE_IMAGE_DPI} 이상 {_MAX_PAGE_IMAGE_DPI} 이하의 정수여야 합니다"
+            )
+
+        pages_dir = self.config.pages_dir(document_id)
+        page_paths = {
+            page: pages_dir / f"p{page}.png"
+            for page in page_numbers
+        }
+        cache_hits = {
+            page: path.exists()
+            for page, path in page_paths.items()
+        }
+        missing_pages = {
+            page
+            for page in page_numbers
+            if not cache_hits[page]
+        }
+
+        # 캐시가 모두 있으면 매니페스트와 PDF 경로조차 확인하지 않는다. 원본 경로가 끊긴
+        # 문서도 이미 렌더된 페이지는 계속 볼 수 있어야 한다.
+        if missing_pages:
+            manifest = self.manifests.read(document_id)
+            source_path = (
+                Path(manifest.source_path)
+                if manifest is not None and manifest.source_path
+                else None
+            )
+            if source_path is None or not source_path.exists():
+                pdf_display = str(source_path) if source_path is not None else "매니페스트에 기록 없음"
+                cache_display = ", ".join(
+                    str(page_paths[page])
+                    for page in sorted(missing_pages)
+                )
+                raise ValueError(
+                    f"문서 '{document_id}'의 요청 페이지에는 PDF와 페이지 캐시가 모두 없습니다. "
+                    f"기대한 PDF 경로: {pdf_display}. "
+                    f"기대한 캐시 경로: {cache_display}. "
+                    "PDF를 위 원본 경로에 두면 페이지를 볼 수 있습니다."
+                )
+
+            # render_pages의 기존 캐시 경로 규약을 그대로 쓰되 이번 요청의 화면 확인 DPI만
+            # 임시 Config에 주입한다. 서비스의 색인용 render_dpi 설정은 변경하지 않는다.
+            render_config = replace(self.config, render_dpi=effective_dpi)
+            rendered_paths = render_pages(
+                source_path,
+                document_id,
+                render_config,
+                missing_pages,
+            )
+            for page in missing_pages:
+                rendered_path = Path(rendered_paths.get(page, page_paths[page]))
+                if rendered_path.exists():
+                    page_paths[page] = rendered_path
+
+            unavailable_pages = [
+                page
+                for page in sorted(missing_pages)
+                if not page_paths[page].exists()
+            ]
+            if unavailable_pages:
+                cache_display = ", ".join(
+                    str(page_paths[page])
+                    for page in unavailable_pages
+                )
+                raise ValueError(
+                    f"PDF에서 요청한 페이지를 렌더하지 못했습니다: {unavailable_pages}. "
+                    f"PDF 경로: {source_path}. 기대한 캐시 경로: {cache_display}."
+                )
+
+        response = []
+        for page in page_numbers:
+            path = page_paths[page]
+            image, width, height = _page_image_bytes(
+                path,
+                self.config.page_image_max_width,
+            )
+            response.append(
+                {
+                    "document_id": document_id,
+                    "page": page,
+                    "cache_hit": cache_hits[page],
+                    "path": str(path),
+                    "mime_type": "image/jpeg",
+                    "width": width,
+                    "height": height,
+                    "image": image,
+                }
+            )
+        return response
 
     def list_documents(self) -> list[dict]:
         """실제로 존재하는 문서별 컬렉션을 기준으로 색인 문서 목록을 반환한다."""

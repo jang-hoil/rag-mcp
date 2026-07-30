@@ -13,7 +13,8 @@ from __future__ import annotations
 from functools import partial
 
 import anyio
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Image
+from mcp.types import TextContent
 
 from .service import RagService
 from .request_models import JsonValue
@@ -75,6 +76,47 @@ async def ingest_status(job_id: str) -> dict:
 async def get_chunk(chunk_id: str, embedding_model: str | None = None) -> dict:
     """chunk_id로 단건 조회."""
     return await _run(service().get_chunk, chunk_id, embedding_model=embedding_model)
+
+
+@mcp.tool()
+async def get_page_image(
+    document_id: str,
+    pages: int | list[int],
+    dpi: int | None = None,
+):
+    """문서의 원본 페이지를 실제 이미지 콘텐츠로 반환한다.
+
+    pages는 단일 페이지 번호 또는 최대 5쪽의 목록이다. 캐시 PNG를 먼저 사용하고,
+    빠진 페이지만 manifest의 원본 PDF에서 렌더한다. dpi 미지정 시 화면 확인용 144dpi를 쓴다.
+    """
+    page_images = await _run(
+        service().get_page_image,
+        document_id,
+        pages,
+        dpi=dpi,
+    )
+    content = []
+    for page_image in page_images:
+        cache_text = "예" if page_image["cache_hit"] else "아니요(이번 요청에서 렌더)"
+        content.append(
+            TextContent(
+                type="text",
+                text=(
+                    f"document_id: {page_image['document_id']}\n"
+                    f"page: {page_image['page']}\n"
+                    f"캐시 사용: {cache_text}\n"
+                    f"실제 파일 경로: {page_image['path']}\n"
+                    f"반환 이미지: JPEG {page_image['width']}x{page_image['height']}"
+                ),
+            )
+        )
+        content.append(
+            Image(
+                data=page_image["image"],
+                format="jpeg",
+            )
+        )
+    return content
 
 
 @mcp.tool()

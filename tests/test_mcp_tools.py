@@ -1,4 +1,4 @@
-"""service.py(도구 7개) 테스트 — FastMCP 비의존, FakeEmbeddingBackend."""
+"""service.py(도구 10개) 테스트 — FastMCP 비의존, FakeEmbeddingBackend."""
 import os
 
 import pytest
@@ -816,7 +816,7 @@ def test_retriever_cache_is_thread_safe(svc, monkeypatch):
 
 
 def test_server_imports_and_registers_tools():
-    """FastMCP server가 import되고 도구 8개(ingest_status 포함)가 등록되는지."""
+    """FastMCP server가 import되고 페이지 이미지 도구까지 등록되는지."""
     import asyncio
     from rag_mcp import server
 
@@ -824,6 +824,7 @@ def test_server_imports_and_registers_tools():
     assert {
         "search_documents", "ingest_pdf", "ingest_status", "get_chunk", "list_documents",
         "delete_document", "reindex_document", "collection_status",
+        "review_before_ingest", "get_page_image",
     } <= names
 
 

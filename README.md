@@ -411,6 +411,12 @@ Claude Desktop은 내부적으로 `search_documents` 도구를 호출해 결과�
 검색은 문서별 sparse IDF를 사용하므로 `document_id`가 필수이며, 모르면 먼저
 `list_documents`로 사용할 값을 확인합니다.
 
+검색 결과의 `source.page_image`는 기존 vision·OCR 호환을 위해 유지하는 **로컬 파일
+경로 문자열**입니다. Claude Desktop은 이 경로만으로 이미지를 화면에 표시할 수 없습니다.
+원본 페이지를 눈으로 확인하려면 `get_page_image(document_id, pages)`를 호출하세요.
+`needs_image`가 아닌 일반 텍스트 페이지도 볼 수 있고, 한 번에 최대 5쪽을 실제 MCP 이미지
+콘텐츠(JPEG)와 페이지·캐시·파일 경로 설명으로 함께 반환합니다.
+
 ### 문서를 삭제할 때
 
 삭제는 실수 방지를 위해 확인값이 필요합니다.
@@ -431,6 +437,7 @@ list_documents로 색인된 문서를 보여줘.
 | PDF 색인 시작 | "이 PDF를 fiscal_year 2026으로 색인해줘. 경로는 `C:\문서\2026예산.pdf`" | `ingest_pdf` |
 | 색인 진행 확인 | "방금 job_id로 진행 상태 확인해줘" | `ingest_status` |
 | 검색(질문) | "document_id가 `2026 예산지침`인 문서에서 일상경비 한도 찾아줘. 근거 페이지도 같이" | `search_documents` |
+| 원본 페이지 보기 | "document_id가 `2026 예산지침`인 문서의 9쪽을 get_page_image로 보여줘" | `get_page_image` |
 | 문서 목록 보기 | "색인된 문서 목록 보여줘" | `list_documents` |
 | 특정 청크 원문 | "이 chunk_id 원문 보여줘" | `get_chunk` |
 | 문서 삭제 | "이 문서 삭제해줘, confirm=True로" | `delete_document` |
@@ -497,6 +504,8 @@ Claude Desktop 중심으로 사용할 때는 자주 쓰지 않아도 되지만, 
 | `RAG_CHUNK_BOUNDARY_WINDOW` | `160` | 본문 800자 목표치 앞뒤의 문장 경계 탐색 범위 |
 | `RAG_HF_OFFLINE` | `1` | `1`이면 임베딩 모델을 로컬 캐시에서만 로드(HF 네트워크 조회 차단). 정부망 등에서 검색이 멈추는 것을 막는다. 모델을 처음 받을 때만 `0`으로 두고 1회 다운로드 |
 | `RAG_RENDER_DPI` | `200` | 표/페이지 이미지 렌더 DPI |
+| `RAG_PAGE_IMAGE_DPI` | `144` | `get_page_image`가 캐시에 없는 페이지를 화면 확인용으로 렌더할 기본 DPI |
+| `RAG_PAGE_IMAGE_MAX_WIDTH` | `1600` | MCP 응답 이미지의 최대 가로 픽셀(초과 시 비율 유지 축소) |
 | `RAG_OCR` | `auto` | `off`, `auto`, `force` |
 | `RAG_OCR_MIN_CHARS` | `30` | 스캔 PDF 판정 임계(페이지당 글자 수가 이 값 미만이면 빈약한 페이지) |
 | `RAG_OCR_LANG` | `kor+eng` | Tesseract OCR 언어 |
@@ -614,7 +623,7 @@ RAG MCP\                          ← 프로젝트 루트(= --directory)
 │
 ├─ src\rag_mcp\                   ◆ 소스코드 (25개 모듈)
 │   ├─ server.py                   FastMCP 진입점(도구 등록)
-│   ├─ service.py                  도구 9개 비즈니스 로직
+│   ├─ service.py                  도구 10개 비즈니스 로직
 │   ├─ pipeline.py, pdf_parser.py, chunking.py, table_chunking.py   파싱·청킹
 │   ├─ embeddings.py, sparse.py, tokenizer.py                       임베딩·한국어 토큰화
 │   ├─ retrieval.py, vector_store.py                                검색·Qdrant
