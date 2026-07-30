@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from pathlib import Path
 from typing import Protocol
 
@@ -93,6 +94,7 @@ class CrossEncoderReranker:
     def __init__(self, config: Config):
         self.model_path = config.cross_reranker_model
         self._model = None
+        self._load_lock = threading.Lock()
 
     def _ensure_model(self):
         path = Path(self.model_path).expanduser() if self.model_path else None
@@ -102,18 +104,22 @@ class CrossEncoderReranker:
                 "RAG_CROSS_RERANKER_MODEL에 이미 내려받은 모델 경로를 지정하세요. "
                 "오프라인 안전을 위해 자동 다운로드하지 않습니다."
             )
-        if self._model is None:
-            try:
-                from sentence_transformers import CrossEncoder
+        model = self._model
+        if model is not None:
+            return model
+        with self._load_lock:
+            if self._model is None:
+                try:
+                    from sentence_transformers import CrossEncoder
 
-                self._model = CrossEncoder(str(path), local_files_only=True)
-            except Exception as error:
-                raise RuntimeError(
-                    "로컬 cross 리랭커 모델을 열지 못했습니다. "
-                    "오프라인 안전을 위해 자동 다운로드하지 않습니다: "
-                    f"{error}"
-                ) from error
-        return self._model
+                    self._model = CrossEncoder(str(path), local_files_only=True)
+                except Exception as error:
+                    raise RuntimeError(
+                        "로컬 cross 리랭커 모델을 열지 못했습니다. "
+                        "오프라인 안전을 위해 자동 다운로드하지 않습니다: "
+                        f"{error}"
+                    ) from error
+            return self._model
 
     def rerank(self, query: str, results: list[SearchResult]) -> list[SearchResult]:
         if not results:

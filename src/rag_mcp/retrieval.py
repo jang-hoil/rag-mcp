@@ -9,13 +9,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import threading
 
 from qdrant_client.models import ScoredPoint
 
 from .config import Config
 from .embeddings import EmbeddingBackend, get_backend
 from .models import SearchResult, SearchSource
-from .rerank import build_reranker
+from .rerank import Reranker, build_reranker
 from .request_models import FilterValue
 from .sparse import to_sparse_query
 from .vector_store import VectorStore
@@ -65,12 +66,42 @@ class Retriever:
         self.document_id = document_id
         self._backend = backend  # lazy: 실제 호출 시 로딩
         self.store = store or VectorStore(config, embedding_model, document_id)
+        self._reranker: Reranker | None = None
+        self._reranker_cache_key: tuple | None = None
+        self._reranker_lock = threading.Lock()
 
     @property
     def backend(self) -> EmbeddingBackend:
         if self._backend is None:
             self._backend = get_backend(self.embedding_model)
         return self._backend
+
+    def _current_reranker_key(self) -> tuple:
+        """리랭커 인스턴스 생성에 영향을 주는 설정 키."""
+        return (
+            self.config.reranker,
+            self.config.cross_reranker_model,
+            self.config.rerank_lexical_weight,
+            self.config.rerank_heading_weight,
+            self.config.rerank_table_weight,
+            self.config.rerank_amount_weight,
+            self.config.rerank_code_weight,
+            self.config.rerank_length_weight,
+        )
+
+    @property
+    def reranker(self) -> Reranker:
+        """설정별 리랭커를 지연 생성하고 스레드 안전하게 재사용한다."""
+        key = self._current_reranker_key()
+        reranker = self._reranker
+        if reranker is not None and self._reranker_cache_key == key:
+            return reranker
+        with self._reranker_lock:
+            key = self._current_reranker_key()
+            if self._reranker is None or self._reranker_cache_key != key:
+                self._reranker = build_reranker(self.config)
+                self._reranker_cache_key = key
+            return self._reranker
 
     def search(
         self,
@@ -156,7 +187,7 @@ class Retriever:
             self._to_result(point, search_mode, q_sparse_idx)
             for point in kept
         ]
-        reranked = build_reranker(self.config).rerank(query, converted)[:top_k]
+        reranked = self.reranker.rerank(query, converted)[:top_k]
         return SearchOutcome(
             results=reranked,
             candidates_before_filter=candidates_before_filter,

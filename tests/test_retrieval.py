@@ -214,3 +214,39 @@ def test_lexical_reranker_promotes_relevant_candidate_from_wider_pool(fake_backe
     outcome = retriever.search_with_diagnostics("201-01 한도", top_k=1)
 
     assert [result.chunk_id for result in outcome.results] == ["d1::relevant"]
+
+
+def test_retriever_builds_reranker_once_and_rebuilds_on_config_change(
+    fake_backend,
+    monkeypatch,
+):
+    points = [_point(1, "d1::first", 0.6667)]
+    store = _ThresholdStore(points, {1: 0.8})
+    config = Config(reranker="lexical")
+    retriever = Retriever(
+        config,
+        document_id="d1",
+        backend=fake_backend,
+        store=store,
+    )
+    built_keys = []
+
+    class _PassThroughReranker:
+        def rerank(self, query, results):
+            return list(results)
+
+    def fake_build(current_config):
+        built_keys.append(
+            (current_config.reranker, current_config.rerank_lexical_weight)
+        )
+        return _PassThroughReranker()
+
+    monkeypatch.setattr("rag_mcp.retrieval.build_reranker", fake_build)
+
+    retriever.search("첫 질의")
+    retriever.search("둘째 질의")
+    assert built_keys == [("lexical", 1.0)]
+
+    config.rerank_lexical_weight = 1.5
+    retriever.search("설정 변경 뒤 질의")
+    assert built_keys == [("lexical", 1.0), ("lexical", 1.5)]
