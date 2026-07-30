@@ -104,6 +104,10 @@ class Config:
     rerank_length_weight: float = field(
         default_factory=lambda: float(_env("RAG_RERANK_LENGTH_WEIGHT", "0.05"))
     )
+    # 본문 800자 목표치 앞뒤에서 문장 경계를 찾는 범위.
+    chunk_boundary_window: int = field(
+        default_factory=lambda: int(_env("RAG_CHUNK_BOUNDARY_WINDOW", "160"))
+    )
 
     def __post_init__(self) -> None:
         if self.qdrant_mode not in {"local", "server"}:
@@ -135,6 +139,8 @@ class Config:
         )
         if any(weight < 0 for weight in rerank_weights):
             raise ValueError("리랭커 가중치는 0 이상이어야 합니다")
+        if not 0 <= self.chunk_boundary_window <= 800:
+            raise ValueError("chunk_boundary_window는 0 이상 800 이하여야 합니다")
 
     # 파생 경로
     @property

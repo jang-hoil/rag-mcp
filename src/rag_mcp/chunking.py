@@ -3,12 +3,14 @@
 - 표는 절대 중간 분할하지 않는다(atomic).
 - borderless 뭉친 표(한 셀에 숫자 2개+ 공백 분리)는 needs_image.
 - 연속 페이지 표(열 수 동일·페이지+1)는 병합 후 한 청크로 처리.
-- 본문은 800자 초과 시 overlap 120으로 분할.
+- 본문은 800자를 목표로 가까운 문장 경계에서 overlap 120으로 분할.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
+from .config import Config
 from .metadata import has_amount, has_code
 from .models import Chunk
 from .pdf_parser import ParsedDoc, normalize_text
@@ -21,6 +23,12 @@ from .table_chunking import (
 
 BODY_MAX = 800
 BODY_OVERLAP = 120
+BODY_ABSOLUTE_MAX_FACTOR = 1.5
+
+_SENTENCE_END_RE = re.compile(r"[.!?](?=\s|$)")
+_LIST_MARKER_RE = re.compile(
+    r"(?m)^[ \t]*(?=(?:[①-⑳]|[△▲▽▼▶▷]|[-·])(?:[ \t]|$))"
+)
 
 
 def _heading_level(block: dict[str, Any]) -> int:
@@ -53,20 +61,86 @@ def block_plain_text(block: dict[str, Any]) -> str:
     content = block.get("content")
     return normalize_text(str(content)).strip() if content else ""
 
-def split_long_text(text: str, max_len: int = BODY_MAX, overlap: int = BODY_OVERLAP) -> list[str]:
+def sentence_boundary_positions(text: str) -> list[int]:
+    """한국어 문장 종결과 줄 단위 목록 표지의 경계 위치를 반환한다.
+
+    마침표·물음표·느낌표는 ``다.``, ``요.``, ``까?``, ``함.``, ``임.``,
+    ``음.``, ``됩니다.``, ``습니다.``, ``입니다.``를 모두 포함한다.
+    """
+    boundaries = {match.end() for match in _SENTENCE_END_RE.finditer(text)}
+    boundaries.update(match.start() for match in _LIST_MARKER_RE.finditer(text))
+    return sorted(position for position in boundaries if 0 < position <= len(text))
+
+
+def _nearest_boundary(
+    boundaries: list[int],
+    target: int,
+    lower: int,
+    upper: int,
+) -> int | None:
+    candidates = [
+        position for position in boundaries
+        if lower <= position <= upper
+    ]
+    if not candidates:
+        return None
+    # 같은 거리면 목표치 이전 경계를 택해 불필요하게 긴 청크를 피한다.
+    return min(candidates, key=lambda position: (abs(position - target), position))
+
+
+def split_long_text(
+    text: str,
+    max_len: int = BODY_MAX,
+    overlap: int = BODY_OVERLAP,
+    boundary_window: int = 160,
+) -> list[str]:
+    """본문을 목표 길이 근처의 문장 경계에서 나눈다.
+
+    경계를 못 찾으면 기존 문자 수 절단으로 폴백하며, 어떤 경우에도 목표치의
+    1.5배를 넘지 않는다. overlap 시작점도 가능한 경우 문장 경계를 사용한다.
+    """
     text = text.strip()
     if not text:
         return []
+    if max_len <= 0:
+        raise ValueError("max_len은 0보다 커야 합니다")
+    if not 0 <= overlap < max_len:
+        raise ValueError("overlap은 0 이상 max_len 미만이어야 합니다")
+    if boundary_window < 0:
+        raise ValueError("boundary_window는 0 이상이어야 합니다")
     if len(text) <= max_len:
         return [text]
+
+    absolute_max = max(max_len, int(max_len * BODY_ABSOLUTE_MAX_FACTOR))
+    boundaries = sentence_boundary_positions(text)
     parts: list[str] = []
     start = 0
     while start < len(text):
-        end = min(start + max_len, len(text))
+        if len(text) - start <= max_len:
+            parts.append(text[start:].strip())
+            break
+
+        target = start + max_len
+        lower = max(start + 1, target - boundary_window)
+        upper = min(
+            len(text),
+            start + absolute_max,
+            target + boundary_window,
+        )
+        end = _nearest_boundary(boundaries, target, lower, upper) or target
+        end = min(end, start + absolute_max, len(text))
         parts.append(text[start:end].strip())
         if end >= len(text):
             break
-        start = max(end - overlap, start + 1)
+
+        desired_start = max(start + 1, end - overlap)
+        overlap_start = _nearest_boundary(
+            boundaries,
+            desired_start,
+            max(start + 1, desired_start - boundary_window),
+            min(end - 1, desired_start + boundary_window),
+        )
+        start = overlap_start if overlap_start is not None else desired_start
     return [p for p in parts if p]
 
 
@@ -80,9 +154,10 @@ def _flush_body(
     doc_name: str | None,
     fiscal_year: int | None,
     source_path: str | None,
+    boundary_window: int,
 ) -> tuple[list[Chunk], int]:
     chunks: list[Chunk] = []
-    for piece in split_long_text(buffer):
+    for piece in split_long_text(buffer, boundary_window=boundary_window):
         chunks.append(
             Chunk(
                 chunk_id=f"{document_id}::c{chunk_index}",
@@ -108,8 +183,15 @@ def build_chunks(
     doc_name: str | None = None,
     fiscal_year: int | None = None,
     source_path: str | None = None,
+    config: Config | None = None,
 ) -> list[Chunk]:
     """ParsedDoc → 색인용 Chunk 리스트."""
+    settings = config or Config()
+    boundary_window = settings.chunk_boundary_window
+    flush_at = min(
+        BODY_MAX + boundary_window,
+        int(BODY_MAX * BODY_ABSOLUTE_MAX_FACTOR),
+    )
     blocks = merge_cross_page_tables(list(parsed.iter_blocks()))
     heading_stack: list[tuple[int, str]] = []
     buffer = ""
@@ -144,6 +226,7 @@ def build_chunks(
                     doc_name=doc_name,
                     fiscal_year=fiscal_year,
                     source_path=source_path,
+                    boundary_window=boundary_window,
                 )
                 chunks.extend(new_chunks)
                 buffer = ""
@@ -162,6 +245,7 @@ def build_chunks(
                     doc_name=doc_name,
                     fiscal_year=fiscal_year,
                     source_path=source_path,
+                    boundary_window=boundary_window,
                 )
                 chunks.extend(new_chunks)
                 buffer = ""
@@ -200,7 +284,7 @@ def build_chunks(
                 buffer += "\n" + piece
             else:
                 buffer = piece
-            if len(buffer) >= BODY_MAX:
+            if len(buffer) >= flush_at:
                 new_chunks, chunk_index = _flush_body(
                     buffer,
                     document_id=parsed.document_id,
@@ -210,6 +294,7 @@ def build_chunks(
                     doc_name=doc_name,
                     fiscal_year=fiscal_year,
                     source_path=source_path,
+                    boundary_window=boundary_window,
                 )
                 chunks.extend(new_chunks)
                 buffer = ""
@@ -225,6 +310,7 @@ def build_chunks(
             doc_name=doc_name,
             fiscal_year=fiscal_year,
             source_path=source_path,
+            boundary_window=boundary_window,
         )
         chunks.extend(new_chunks)
 

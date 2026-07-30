@@ -132,6 +132,14 @@ def test_reranker_defaults_and_environment_overrides(monkeypatch):
     assert configured.rerank_lexical_weight == pytest.approx(1.5)
 
 
+def test_chunk_boundary_window_default_and_environment_override(monkeypatch):
+    monkeypatch.delenv("RAG_CHUNK_BOUNDARY_WINDOW", raising=False)
+    assert Config().chunk_boundary_window == 160
+
+    monkeypatch.setenv("RAG_CHUNK_BOUNDARY_WINDOW", "220")
+    assert Config().chunk_boundary_window == 220
+
+
 def test_invalid_qdrant_mode_fails_before_store_open():
     with pytest.raises(ValueError, match="local|server"):
         Config(qdrant_mode="sever")

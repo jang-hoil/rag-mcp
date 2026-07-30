@@ -3,7 +3,13 @@ from __future__ import annotations
 
 import pytest
 
-from rag_mcp.chunking import BODY_MAX, BODY_OVERLAP, build_chunks, split_long_text
+from rag_mcp.chunking import (
+    BODY_MAX,
+    BODY_OVERLAP,
+    build_chunks,
+    sentence_boundary_positions,
+    split_long_text,
+)
 from rag_mcp.config import load_config
 from rag_mcp.pdf_parser import parse_pdf
 from rag_mcp.table_chunking import (
@@ -89,6 +95,55 @@ def test_split_long_text_overlap():
     assert parts[0][-BODY_OVERLAP:] == parts[1][:BODY_OVERLAP]
 
 
+def test_korean_sentence_and_list_boundaries_are_detected():
+    text = "첫 기준입니다. 다음 항목인가요?\n① 첫째\n△ 둘째\n- 셋째\n· 넷째"
+    positions = sentence_boundary_positions(text)
+    boundaries = {text[:position].rstrip()[-1:] for position in positions}
+
+    assert "." in boundaries
+    assert "?" in boundaries
+    for marker in ("①", "△", "-", "·"):
+        assert text.index(marker) in positions
+
+
+def test_split_long_text_prefers_sentence_boundary_near_target():
+    first_sentence = "가" * (BODY_MAX - 70) + " 첫 번째 기준을 적용합니다."
+    second_sentence = " 동일 재산으로 인한 소득은 중복하여 인정하지 않습니다."
+    text = first_sentence + second_sentence + " 이후 처리 절차를 확인합니다." * 20
+
+    parts = split_long_text(text, boundary_window=160)
+
+    assert len(parts) >= 2
+    assert parts[0].endswith(".")
+    assert not parts[0].endswith("인정하")
+    assert "동일 재산으로 인한 소득은 중복하여 인정하지 않습니다." in parts[0]
+
+
+def test_split_long_text_without_boundary_falls_back_to_character_limit():
+    text = "가" * (BODY_MAX * 2 + 17)
+    parts = split_long_text(text, boundary_window=160)
+
+    assert parts[0] == "가" * BODY_MAX
+    assert all(len(part) <= BODY_MAX for part in parts)
+
+
+def test_split_long_text_never_exceeds_absolute_limit():
+    text = "가" * (BODY_MAX * 2) + " 문장입니다."
+    parts = split_long_text(text, boundary_window=BODY_MAX)
+
+    assert all(len(part) <= int(BODY_MAX * 1.5) for part in parts)
+
+
+def test_sentence_aware_overlap_starts_at_boundary():
+    sentence = "이 문장은 문장 경계 overlap을 검증합니다."
+    text = " ".join([sentence] * 40)
+    parts = split_long_text(text, boundary_window=160)
+
+    assert len(parts) >= 2
+    assert parts[1].startswith("이 문장은")
+    assert not parts[1].startswith(("니다.", "합니다."))
+
+
 def test_is_mashed_table_on_synthetic():
     mashed = _table(1, 1, [(1, 1, "10 20 30")])
     clean = _table(1, 1, [(1, 1, "개정번호")])
@@ -114,6 +169,25 @@ def test_build_chunks_atomic_table():
     assert len(table_chunks) == 1
     assert "개정번호" in table_chunks[0].text
     assert table_chunks[0].needs_image is False
+
+
+def test_build_chunks_never_splits_oversized_table():
+    from rag_mcp.pdf_parser import ParsedDoc
+
+    large_text = "표 안의 매우 긴 값 " * 200
+    parsed = ParsedDoc(
+        document_id="large-table",
+        tree={"kids": [_table(1, 1, [(1, 1, large_text)])]},
+        json_path=None,
+        md_path=None,
+        parsed_dir=None,
+    )
+
+    chunks = build_chunks(parsed)
+
+    assert len(chunks) == 1
+    assert chunks[0].is_table is True
+    assert len(chunks[0].text) > int(BODY_MAX * 1.5)
 
 
 @pytest.fixture(scope="module")

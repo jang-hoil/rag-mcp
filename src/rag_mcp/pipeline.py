@@ -33,6 +33,7 @@ def parse_and_chunk(
         doc_name=meta.get("doc_name"),
         fiscal_year=meta.get("fiscal_year"),
         source_path=meta["source_path"],
+        config=config,
     )
 
     need_pages = {c.page for c in chunks if c.needs_image and c.page}
