@@ -90,22 +90,37 @@ RAG MCP\
 
 ### 5. Claude Desktop에 연결
 
-먼저 `uv` 위치를 확인합니다.
+붙여넣을 경로 **두 개**를 먼저 확인합니다. 2번에서 쓰던 **cmd 창 그대로** 아래 두 줄을 실행하세요.
 
 ```bat
 where uv
+cd
 ```
 
-Claude Desktop → **Settings → Developer → Edit Config**를 열고 아래를 붙여넣습니다. **경로 두 곳만** 본인 값으로 바꾸세요.
+- `where uv` → **uv 프로그램 위치**
+- `cd` → **지금 있는 폴더 경로.** 2번에서 `cd "RAG MCP"`로 들어와 있으므로 이게 곧 RAG MCP 폴더 경로입니다
+
+이렇게 나옵니다(사람마다 다릅니다).
+
+```text
+C:\Users\Owner\AppData\Local\Programs\Python\Python311\Scripts\uv.exe
+C:\Users\Owner\Desktop\RAG MCP
+```
+
+> cmd 창을 닫았다면 다시 열고 `cd /d "%USERPROFILE%\Desktop\RAG MCP"`를 실행한 뒤 위 두 줄을 실행하세요.
+>
+> 폴더 경로는 **파일 탐색기 주소창**을 클릭해서 복사해도 됩니다.
+
+이제 Claude Desktop → **Settings → Developer → Edit Config**를 열고 아래를 붙여넣습니다. **경로 두 곳만** 방금 확인한 값으로 바꾸세요.
 
 ```json
 {
   "mcpServers": {
     "rag-mcp": {
-      "command": "여기에 where uv 결과 경로",
+      "command": "여기에 where uv 결과를 붙여넣기",
       "args": [
         "--directory",
-        "여기에 RAG MCP 폴더 경로",
+        "여기에 cd 결과를 붙여넣기",
         "run",
         "rag-mcp",
         "serve"
