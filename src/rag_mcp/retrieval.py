@@ -154,7 +154,10 @@ class Retriever:
         rel_score_ratio = self.config.rel_score_ratio
 
         dense_scores: dict[str | int, float] = {}
-        if min_dense_score > 0 and search_mode in ("dense", "hybrid"):
+        if (
+            (min_dense_score > 0 or rel_score_ratio > 0)
+            and search_mode in ("dense", "hybrid")
+        ):
             if search_mode == "dense":
                 dense_scores = {point.id: float(point.score) for point in points}
             else:
@@ -163,7 +166,18 @@ class Retriever:
                     [point.id for point in points],
                 )
 
-        top_fusion_score = float(points[0].score) if points else 0.0
+        if search_mode in ("dense", "hybrid"):
+            top_relative_score = max(dense_scores.values(), default=0.0)
+        else:
+            top_relative_score = max(
+                (float(point.score) for point in points),
+                default=0.0,
+            )
+        relative_threshold = (
+            top_relative_score * rel_score_ratio
+            if top_relative_score > 0
+            else top_relative_score
+        )
         kept: list[ScoredPoint] = []
         filtered_by_dense = 0
         filtered_by_relative = 0
@@ -177,7 +191,12 @@ class Retriever:
                 continue
             if (
                 rel_score_ratio > 0
-                and float(point.score) < top_fusion_score * rel_score_ratio
+                and (
+                    dense_scores.get(point.id, -1.0)
+                    if search_mode in ("dense", "hybrid")
+                    else float(point.score)
+                )
+                < relative_threshold
             ):
                 filtered_by_relative += 1
                 continue

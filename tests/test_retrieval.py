@@ -151,17 +151,34 @@ def test_dense_absolute_threshold_uses_separate_cosine_score(fake_backend):
     assert outcome.filtered_by_dense == 1
 
 
-def test_relative_score_ratio_filters_large_rank_drop(fake_backend):
-    points = [_point(1, "d1::first", 1.0), _point(2, "d1::second", 0.59)]
-    store = _ThresholdStore(points, {1: 0.8, 2: 0.8})
+def test_hybrid_relative_score_ratio_uses_dense_cosine_not_rrf(fake_backend):
+    """hybrid 상대 컷은 RRF 순위 점수가 아니라 별도 dense 코사인을 사용한다."""
+    points = [_point(1, "d1::first", 0.6667), _point(2, "d1::second", 0.65)]
+    store = _ThresholdStore(points, {1: 0.9, 2: 0.4})
     retriever = Retriever(
-        Config(rel_score_ratio=0.6),
+        Config(rel_score_ratio=0.9),
         document_id="d1",
         backend=fake_backend,
         store=store,
     )
 
     outcome = retriever.search_with_diagnostics("질의", search_mode="hybrid")
+
+    assert [result.chunk_id for result in outcome.results] == ["d1::first"]
+    assert outcome.filtered_by_relative == 1
+
+
+def test_dense_relative_score_ratio_uses_cosine_score(fake_backend):
+    points = [_point(1, "d1::first", 0.9), _point(2, "d1::second", 0.4)]
+    store = _ThresholdStore(points, {1: 0.1, 2: 0.99})
+    retriever = Retriever(
+        Config(rel_score_ratio=0.5),
+        document_id="d1",
+        backend=fake_backend,
+        store=store,
+    )
+
+    outcome = retriever.search_with_diagnostics("질의", search_mode="dense")
 
     assert [result.chunk_id for result in outcome.results] == ["d1::first"]
     assert outcome.filtered_by_relative == 1
