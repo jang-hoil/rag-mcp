@@ -127,6 +127,30 @@ def test_split_long_text_without_boundary_falls_back_to_character_limit():
     assert all(len(part) <= BODY_MAX for part in parts)
 
 
+def test_dotted_toc_text_falls_back_without_empty_or_oversized_chunks():
+    """실물과 같은 점선 목차가 문장 종결 없이 길어져도 안전하게 전진한다."""
+    audit_entry = (
+        "2.3.4.3. 실지감사 결과 입력 "
+        + "·" * 450
+        + "129"
+    )
+    expense_entry = (
+        "4. 지방자치단체 업무추진비 "
+        + "·" * 350
+        + " 297"
+    )
+    text = "\n".join([audit_entry, expense_entry] * 8)
+
+    parts = split_long_text(text, boundary_window=40)
+
+    # 목표치 주변에 경계가 없는 첫 구간은 문자 수로 폴백한다.
+    assert len(parts[0]) == BODY_MAX
+    assert len(parts) > 1
+    assert all(part.strip() for part in parts)
+    assert all(len(part) <= int(BODY_MAX * 1.5) for part in parts)
+    assert len(parts) < 20
+
+
 def test_split_long_text_never_exceeds_absolute_limit():
     text = "가" * (BODY_MAX * 2) + " 문장입니다."
     parts = split_long_text(text, boundary_window=BODY_MAX)
