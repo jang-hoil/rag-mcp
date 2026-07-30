@@ -588,6 +588,65 @@ def test_reindex_restores_manifest_avgdl_and_sparse_values(svc, monkeypatch):
     assert sparse_values() == before
 
 
+def test_reindex_restores_manifest_bm25_settings_and_warns_on_mismatch(svc):
+    """재색인은 저장된 k1/b를 복원하고 현재 환경값 불일치를 알린다."""
+    chunks = [
+        Chunk(chunk_id="bm25::c0", document_id="bm25", text="한도 한도 한도"),
+        Chunk(chunk_id="bm25::c1", document_id="bm25", text="절차 기준"),
+    ]
+    svc.ingest_chunks("bm25", chunks)
+    manifest = svc.manifests.read("bm25")
+    assert manifest is not None
+    assert manifest.bm25_k1 == pytest.approx(1.2)
+    assert manifest.bm25_b == pytest.approx(0.75)
+
+    store = svc._indexer("kure", "bm25").store
+    point_id = point_id_for("bm25::c0")
+
+    def sparse_values():
+        return store.client.retrieve(
+            store.collection,
+            ids=[point_id],
+            with_payload=True,
+            with_vectors=True,
+        )[0].vector["sparse"]
+
+    before = sparse_values()
+    svc.config.bm25_k1 = 2.0
+    svc.config.bm25_b = 0.2
+
+    with pytest.warns(RuntimeWarning, match="저장된 BM25.*현재 설정"):
+        result = svc.reindex_document("bm25", reparse=False)
+
+    assert result["ok"] is True
+    restored = svc.manifests.read("bm25")
+    assert restored is not None
+    assert restored.bm25_k1 == pytest.approx(1.2)
+    assert restored.bm25_b == pytest.approx(0.75)
+    assert sparse_values() == before
+
+
+def test_legacy_manifest_without_bm25_settings_uses_current_config(svc):
+    """k1/b가 없는 레거시 매니페스트는 현재 설정을 채택해 이후 재색인에 고정한다."""
+    chunks = [Chunk(chunk_id="legacy-bm25::c0", document_id="legacy-bm25", text="한도 기준")]
+    svc.ingest_chunks("legacy-bm25", chunks)
+    manifest = svc.manifests.read("legacy-bm25")
+    assert manifest is not None
+    manifest.bm25_k1 = None
+    manifest.bm25_b = None
+    svc.manifests.write(manifest)
+
+    svc.config.bm25_k1 = 1.7
+    svc.config.bm25_b = 0.4
+    result = svc.reindex_document("legacy-bm25", reparse=False)
+
+    assert result["ok"] is True
+    upgraded = svc.manifests.read("legacy-bm25")
+    assert upgraded is not None
+    assert upgraded.bm25_k1 == pytest.approx(1.7)
+    assert upgraded.bm25_b == pytest.approx(0.4)
+
+
 def test_reindex_reparse_without_source_pdf(svc):
     # source_path가 없는 문서는 reparse 불가 — 친절 에러
     _seed(svc)  # ingest_chunks라 source_path 없음

@@ -7,6 +7,8 @@ reindex(reparse=False): 기존 chunks.jsonl 재사용 → 재임베딩·재upser
 from __future__ import annotations
 
 import os
+import math
+import warnings
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -81,6 +83,8 @@ class Indexer:
         source_path: str | None = None,
         metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None,
         avgdl: float | None = None,
+        bm25_k1: float | None = None,
+        bm25_b: float | None = None,
     ) -> Manifest:
         """청크 리스트를 색인 (parsed 청크는 이미 추출된 상태로 전달받음).
 
@@ -103,10 +107,14 @@ class Indexer:
             if avgdl is None
             else avgdl
         )
+        effective_k1 = self.config.bm25_k1 if bm25_k1 is None else bm25_k1
+        effective_b = self.config.bm25_b if bm25_b is None else bm25_b
         manifest_fields = dict(
             status="parsed", doc_name=doc_name, fiscal_year=fiscal_year,
             source_path=source_path, embedding_model=self.embedding_model,
             avgdl=effective_avgdl,
+            bm25_k1=effective_k1,
+            bm25_b=effective_b,
             parsed_dir=str(self.config.parsed_doc_dir(document_id)),
         )
         if metadata_payload:
@@ -122,6 +130,8 @@ class Indexer:
                 chunks,
                 vecs,
                 avgdl=effective_avgdl,
+                bm25_k1=effective_k1,
+                bm25_b=effective_b,
             )
         except Exception:
             # 색인 실패를 manifest에 남겨 추적 가능하게(기존 데이터는 위에서 보존됨)
@@ -147,11 +157,42 @@ class Indexer:
                 tmp.unlink()
             raise
 
+    def _bm25_settings_for_reindex(self, manifest: Manifest) -> tuple[float, float]:
+        """저장된 BM25 설정을 우선하고 현재 환경과 다르면 경고한다."""
+        effective_k1 = (
+            self.config.bm25_k1
+            if manifest.bm25_k1 is None
+            else manifest.bm25_k1
+        )
+        effective_b = (
+            self.config.bm25_b
+            if manifest.bm25_b is None
+            else manifest.bm25_b
+        )
+        mismatched = (
+            manifest.bm25_k1 is not None
+            and not math.isclose(manifest.bm25_k1, self.config.bm25_k1)
+        ) or (
+            manifest.bm25_b is not None
+            and not math.isclose(manifest.bm25_b, self.config.bm25_b)
+        )
+        if mismatched:
+            warnings.warn(
+                "매니페스트에 저장된 BM25 설정과 현재 설정이 다릅니다. "
+                f"재색인 멱등성을 위해 저장된 값 "
+                f"(k1={effective_k1}, b={effective_b})을 사용합니다. "
+                f"현재 설정은 k1={self.config.bm25_k1}, b={self.config.bm25_b}입니다.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        return effective_k1, effective_b
+
     def reindex_document(self, document_id: str, reparse: bool = False) -> dict:
         """기존 parsed 청크로 재색인. reparse=True는 파서 재실행(마일스톤2~3 연결 지점)."""
         m = self.manifests.read(document_id)
         if m is None:
             return {"ok": False, "error": f"매니페스트 없음: {document_id}"}
+        bm25_k1, bm25_b = self._bm25_settings_for_reindex(m)
 
         if reparse:
             # PDF 재파싱: 원본 경로가 manifest에 있어야 하고 파일이 실제로 존재해야 함
@@ -169,6 +210,7 @@ class Indexer:
                 document_id, chunks, doc_name=meta.get("doc_name", m.doc_name),
                 fiscal_year=meta.get("fiscal_year", m.fiscal_year),
                 source_path=m.source_path, metadata=(m.meta or None),
+                bm25_k1=bm25_k1, bm25_b=bm25_b,
             )
             return {"ok": True, "document_id": document_id, "num_chunks": len(chunks), "reparse": True}
 
@@ -178,6 +220,7 @@ class Indexer:
         self.index_chunks(
             document_id, chunks, doc_name=m.doc_name, fiscal_year=m.fiscal_year,
             source_path=m.source_path, avgdl=m.avgdl,
+            bm25_k1=bm25_k1, bm25_b=bm25_b,
         )
         return {"ok": True, "document_id": document_id, "num_chunks": len(chunks), "reparse": False}
 

@@ -132,6 +132,8 @@ class VectorStore:
         dense_vectors: list[list[float]],
         *,
         avgdl: float | None = None,
+        bm25_k1: float | None = None,
+        bm25_b: float | None = None,
     ) -> int:
         if len(chunks) != len(dense_vectors):
             raise ValueError("chunks와 dense_vectors 길이 불일치")
@@ -146,13 +148,15 @@ class VectorStore:
             if avgdl is None
             else avgdl
         )
+        effective_k1 = self.config.bm25_k1 if bm25_k1 is None else bm25_k1
+        effective_b = self.config.bm25_b if bm25_b is None else bm25_b
         points = []
         for chunk, dvec in zip(chunks, dense_vectors):
             idx, val = to_sparse_document(
                 chunk.text,
                 avgdl=effective_avgdl,
-                k1=self.config.bm25_k1,
-                b=self.config.bm25_b,
+                k1=effective_k1,
+                b=effective_b,
             )
             points.append(
                 models.PointStruct(
@@ -241,6 +245,8 @@ class VectorStore:
         dense_vectors: list[list[float]],
         *,
         avgdl: float | None = None,
+        bm25_k1: float | None = None,
+        bm25_b: float | None = None,
     ) -> int:
         """문서 포인트 교체를 직렬화하고 실패 시 교체 전 상태로 복구한다."""
         new_point_ids = {point_id_for(chunk.chunk_id) for chunk in chunks}
@@ -276,10 +282,16 @@ class VectorStore:
                     f"Qdrant point ID collision for document {document_id!r}: {details}"
                 )
             try:
-                if avgdl is None:
+                if avgdl is None and bm25_k1 is None and bm25_b is None:
                     count = self.upsert_chunks(chunks, dense_vectors)
                 else:
-                    count = self.upsert_chunks(chunks, dense_vectors, avgdl=avgdl)
+                    count = self.upsert_chunks(
+                        chunks,
+                        dense_vectors,
+                        avgdl=avgdl,
+                        bm25_k1=bm25_k1,
+                        bm25_b=bm25_b,
+                    )
                 self.delete_point_ids(old_point_ids - new_point_ids)
                 return count
             except Exception as primary_error:

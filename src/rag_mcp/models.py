@@ -99,6 +99,9 @@ class Manifest(BaseModel):
     num_chunks: int = 0
     # 문서 sparse BM25 길이 정규화에 사용한 평균 청크 토큰 수.
     avgdl: Optional[float] = None
+    # 재색인 시 같은 sparse 값을 재현하기 위한 BM25 TF 포화 계수.
+    bm25_k1: Optional[float] = None
+    bm25_b: Optional[float] = None
     parsed_dir: Optional[str] = None
     # 사용자 지정 metadata 보존 — reparse(PDF 재파싱) 시 복원용(PDF엔 없는 정보라 여기 남겨야 유실 방지)
     meta: dict[str, JsonValue] = Field(default_factory=dict)

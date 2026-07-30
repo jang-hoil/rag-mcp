@@ -189,6 +189,8 @@ def test_manifest_status_default():
     m = Manifest(document_id="doc1")
     assert m.status == "parsing"
     assert m.avgdl is None
+    assert m.bm25_k1 is None
+    assert m.bm25_b is None
     m.status = "done"
     assert m.status == "done"
 
