@@ -56,8 +56,12 @@ async def ingest_pdf(
 ) -> dict:
     """PDF 색인을 백그라운드로 시작하고 즉시 job_id를 반환(비블로킹).
 
-    큰 PDF는 임베딩에만 수 분이 걸려 동기 색인 시 클라이언트가 타임아웃된다. 진행 상황은
-    ingest_status(job_id)로 폴링한다(status: running|done|error). 동시 색인은 1개만 허용.
+    **응답의 message를 사용자에게 그대로 알려줄 것** — 색인은 수 분~수십 분 걸리므로
+    사용자가 진행 여부를 알아야 한다. 응답에 pages(쪽수), estimated_minutes(대략적 예상),
+    poll_after_seconds(권장 폴링 간격)가 함께 온다.
+
+    이어서 ingest_status(job_id)로 폴링하고, 그 응답의 message(단계·진척률)도 사용자에게
+    전달한다. status는 running|done|error. 동시 색인은 1개만 허용.
     fiscal_year/doc_name 미지정 시 파일명·표지에서 자동 추출 시도. metadata(부서·작성자 등)는
     검색결과에 표시되고 meta.<키> 필터로 검색을 좁힐 수 있다."""
     return await _run(
@@ -68,7 +72,11 @@ async def ingest_pdf(
 
 @mcp.tool()
 async def ingest_status(job_id: str) -> dict:
-    """ingest_pdf로 시작한 백그라운드 색인 작업의 진행 상태(running|done|error)."""
+    """ingest_pdf로 시작한 백그라운드 색인 작업의 진행 상태(running|done|error).
+
+    stage(파싱|임베딩|저장|완료|실패)·processed/total·percent·elapsed_seconds를 담고,
+    message에 "임베딩 진행 중 320/1,064 (30%) — 경과 4분 5초" 형태의 한국어 한 줄이 온다.
+    **폴링할 때마다 message를 사용자에게 전달할 것** — 침묵하면 사용자는 멈춘 줄 안다."""
     return await _run(service().ingest_status, job_id)
 
 

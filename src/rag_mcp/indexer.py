@@ -11,6 +11,7 @@ import math
 import warnings
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Callable
 
 from .config import Config
 from .embeddings import EmbeddingBackend, get_backend
@@ -19,6 +20,12 @@ from .models import Chunk, Manifest
 from .request_models import DocumentMetadata, JsonValue
 from .sparse import average_document_length
 from .vector_store import VectorStore
+
+# (단계, 처리수, 전체수) — 색인 진척 보고 콜백
+ProgressCallback = Callable[[str, int, int], None]
+
+# 임베딩을 이 크기로 쪼개 진척 보고 지점을 만든다(모델 내부 배치와는 별개).
+EMBED_BATCH_SIZE = 64
 
 
 class Indexer:
@@ -85,10 +92,13 @@ class Indexer:
         avgdl: float | None = None,
         bm25_k1: float | None = None,
         bm25_b: float | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> Manifest:
         """청크 리스트를 색인 (parsed 청크는 이미 추출된 상태로 전달받음).
 
         metadata: 문서 단위 추가 메타. 각 청크 meta에 병합되어 payload·검색결과·필터에 반영.
+        on_progress: (단계, 처리수, 전체수) 콜백. 색인이 수 분 걸리는 동안 호출자가
+            사용자에게 진척을 보여줄 수 있게 한다. 미지정이면 아무 것도 하지 않는다(CLI 등).
         """
         if document_id != self.document_id:
             raise ValueError(
@@ -124,7 +134,9 @@ class Indexer:
         # 실패 안전: 임베딩을 먼저 수행(여기서 실패해도 기존 색인은 보존).
         # 임베딩 성공 뒤 Qdrant 교체 전체를 store 잠금 안에서 수행한다.
         try:
-            vecs = self.backend.embed_documents([c.text for c in chunks])
+            vecs = self._embed_chunks(chunks, on_progress)
+            if on_progress is not None:
+                on_progress("저장", len(chunks), len(chunks))
             self.store.replace_document(
                 document_id,
                 chunks,
@@ -142,6 +154,26 @@ class Indexer:
         committed_fields = {**manifest_fields, "status": "embedded", "num_chunks": len(chunks)}
         self.manifests.update(document_id, **committed_fields)
         return self.manifests.update(document_id, status="done", num_chunks=len(chunks))
+
+    def _embed_chunks(
+        self, chunks: list[Chunk], on_progress: ProgressCallback | None
+    ) -> list[list[float]]:
+        """청크를 배치로 임베딩하며 진척을 보고한다.
+
+        배치로 쪼개는 이유는 진척 보고 지점을 만들기 위해서다. 결과 벡터는 한 번에 넘길
+        때와 동일하다(정규화가 텍스트 단위라 배치 경계의 영향이 없음).
+        """
+        total = len(chunks)
+        if on_progress is None:
+            return self.backend.embed_documents([c.text for c in chunks])
+
+        on_progress("임베딩", 0, total)
+        vecs: list[list[float]] = []
+        for start in range(0, total, EMBED_BATCH_SIZE):
+            batch = chunks[start:start + EMBED_BATCH_SIZE]
+            vecs.extend(self.backend.embed_documents([c.text for c in batch]))
+            on_progress("임베딩", len(vecs), total)
+        return vecs
 
     def _stage_chunks(self, document_id: str, chunks: list[Chunk]) -> Path:
         d = self.config.parsed_doc_dir(document_id)

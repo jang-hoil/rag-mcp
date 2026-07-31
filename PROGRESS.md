@@ -222,6 +222,47 @@
 - `ingest_pdf`는 전달된 PDF를 새로 파싱해 색인하며, 색인 중 변경 작업은 `status="busy"`로 거부한다.
 - README와 MCP 연동 가이드의 MCP 도구 수(9개) 및 운영 동작을 갱신했다.
 
+### ✅ 완료 (2026-07-31) — 코덱스 실행 폴더(cwd)에 따라 서버가 죽던 문제 차단
+- **증상**: 코덱스 창에서 rag-mcp 도구가 아예 안 보이거나, 색인한 문서가 사라진 것처럼 보임.
+- **근본 원인(코덱스 로그로 확정)**: `config.py:56` `data_dir`이 `RAG_DATA_DIR` 미설정 시
+  `./data` = **서버가 실행된 폴더 기준 상대경로**. `~/.codex/config.toml`의
+  `[mcp_servers.rag_mcp]`에 `cwd`도 `RAG_DATA_DIR`도 없어 코덱스가 서 있던 폴더를 그대로 물려받음.
+  2026-07-31 08:43:51 실제로 코덱스 설치 폴더에서 기동 →
+  `PermissionError [WinError 5] 'C:\Program Files\WindowsApps\OpenAI.Codex_...\app\data'`
+  (`vector_store.py:48` mkdir ← `service.py:173` preflight) → 서버 즉사 →
+  코덱스 로그 `MCP server tools unavailable server_name=rag_mcp`.
+  - 조용한 실패 경로가 더 위험: 쓰기 가능한 엉뚱한 폴더면 **빈 인덱스를 새로 만들고 에러 없이 동작**.
+  - Claude Desktop 설정은 `uv --directory <프로젝트>`로 cwd를 고정해 이 문제가 없었음(코덱스 이관 시 누락).
+- **조치**: `~/.codex/config.toml`의 `[mcp_servers.rag_mcp.env]`에
+  `RAG_DATA_DIR = 'D:\User\Desktop\rag mcp\data'` 추가(백업 `config.toml.bak-20260731-093922`).
+  - 검증: cwd를 `C:\Windows`로 두고 실행 시 미설정=`C:\Windows\data\qdrant`(재현) →
+    설정 후 `D:\User\Desktop\rag mcp\data\qdrant`(정상). TOML 파싱·타 MCP 서버 항목 보존 확인.
+- **미해결(별건)**: 2026-07-30 17:13 세션 `ingest_pdf` 300초 타임아웃. 그 세션은 경로가 정상이었고
+  색인도 완주(1,064청크 done)했으므로 cwd 문제와 무관. `ingest_pdf`는 웜/콜드 서버 모두
+  0.04초에 job_id를 반환함을 실측했으므로 **설계가 아니라 응답 배달 실패**. 원인 미확정.
+- **논의 필요**: `Config`가 cwd 대신 프로젝트 루트 기준으로 경로를 풀도록 바꿀지(CLI 동작도 함께 바뀜).
+
+### ✅ 완료 (2026-07-31) — 색인 진행 상황 보고 (ingest_pdf 안내문 + ingest_status 진척도)
+- **문제**: `ingest_pdf`는 `job_id`만, `ingest_status`는 `running` 한 단어만 반환 → MCP
+  클라이언트가 사용자에게 "파싱 중이고 몇 분 걸린다"를 말할 재료가 없어 침묵하거나 실패로 오해.
+- **구현(테스트 먼저 → 203 passed/8 skipped → 커밋)**:
+  1. `jobs.py`: `Job`에 `stage`(대기/파싱/임베딩/저장/완료/실패)·`processed`·`total` 추가.
+     `JobStore.progress()` 신설(끝난 job은 갱신 안 함). `to_dict()`가 `percent`·
+     `elapsed_seconds`·한국어 `message`까지 만들어 준다(클라이언트는 그대로 전달만).
+  2. `indexer.py`: `index_chunks(on_progress=...)` 선택 인자. 임베딩을 `EMBED_BATCH_SIZE=64`로
+     쪼개 배치마다 보고(벡터 결과는 한 번에 넘길 때와 동일 — 정규화가 텍스트 단위).
+     콜백 없으면 기존대로 한 번에 임베딩(CLI 경로 무변경).
+  3. `service.py`: `_ingest_pdf_unlocked`/`_ingest_chunks_unlocked`에 `on_progress` 배선,
+     파싱 진입 시 단계 보고. `submit_ingest`가 `pages`·`estimated_minutes`·
+     `poll_after_seconds`·`next_action`·`message`를 함께 반환.
+  4. `server.py`: ingest_pdf/ingest_status docstring에 **"message를 사용자에게 전달하라"** 명시.
+- **소요시간 추정**: `_SECONDS_PER_PAGE = 3.0` (2026-07-30 실측 340쪽/17.5분 ≈ 쪽당 3.1초).
+  어림값이라 "대략 N분"으로만 제시. 쪽수를 못 읽으면 추정을 생략하되 안내는 반드시 나간다.
+- **검증**: 실제 MCP stdio 서버로 `ingest_pdf` **0.14초** 반환 + 안내문 정상, `ingest_status`가
+  `stage=파싱` → 진행 보고. 신규 테스트 8건(안내문 3·job 진척 2·indexer 콜백 2·전체 체인 1).
+- **주의(테스트 환경)**: pymupdf로 만든 합성 PDF는 OpenDataLoader가 청크를 0개 만든다
+  (`parse_and_chunk` 직접 호출로 확인 — 코드 문제 아님). 파서 포함 e2e는 실 PDF가 필요하다.
+
 ## 구현된 모듈 지도 (참고)
 - `config.py` 모델별 컬렉션/차원 · `models.py` Chunk/SearchResult/Manifest
 - `tokenizer.py`(코드/금액 보존)+`sparse.py`(blake2b idx, tf, IDF modifier 전제)

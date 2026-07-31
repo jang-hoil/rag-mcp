@@ -15,7 +15,7 @@ from typing import Optional
 
 from .config import COLLECTION_BY_MODEL, Config, load_config
 from .embeddings import EmbeddingBackend, get_backend
-from .indexer import Indexer
+from .indexer import Indexer, ProgressCallback
 from .jobs import JobStore
 from .manifest import ManifestStore
 from .models import Chunk
@@ -43,11 +43,61 @@ _LEGACY_COLLECTIONS = frozenset(COLLECTION_BY_MODEL.values())
 # 파일명에서만 4자리 연도를 자명하게 추출(PDF 내용은 열지 않음). review_before_ingest 전용.
 _FILENAME_YEAR_RE = re.compile(r"(?:19|20)\d{2}")
 
+# 색인 소요시간 추정 계수. 실측(2026-07-30, 칠곡군 타당성검토 340쪽/1,064청크):
+# 파싱 시작 17:13:33 → manifest done 17:31:00 = 약 17.5분 ≈ 쪽당 3.1초.
+# 기계·PDF 성격에 따라 흔들리므로 "대략"으로만 쓰고 확정 수치처럼 제시하지 않는다.
+_SECONDS_PER_PAGE = 3.0
+# 폴링 간격 하한/상한. 너무 잦으면 대화가 폴링으로 도배되고, 너무 뜸하면 완료를 늦게 안다.
+_MIN_POLL_SECONDS = 10
+_MAX_POLL_SECONDS = 60
+
 
 def _fiscal_year_from_filename(stem: str) -> Optional[int]:
     """파일명 stem에서 연도를 추출. 여러 개면 마지막(파일명 끝의 연도 관례). 없으면 None."""
     matches = _FILENAME_YEAR_RE.findall(stem)
     return int(matches[-1]) if matches else None
+
+
+def _pdf_page_count(path: Path) -> Optional[int]:
+    """PDF 쪽수(못 읽으면 None). 소요시간 추정 전용이라 실패해도 색인을 막지 않는다."""
+    try:
+        import fitz
+
+        with fitz.open(str(path)) as doc:
+            return doc.page_count
+    except Exception:
+        return None
+
+
+def _ingest_guidance(document_id: str, pages: Optional[int]) -> dict:
+    """색인 시작 시 클라이언트가 사용자에게 전달할 안내(소요시간·폴링 주기).
+
+    MCP 클라이언트는 job_id만 받으면 사용자에게 해줄 말이 없어 침묵하거나 실패로 오해한다.
+    쪽수를 못 읽으면 추정을 생략하되 안내 자체는 반드시 내보낸다.
+    """
+    tail = "ingest_status(job_id)로 진행 상황을 확인하세요."
+    if pages is None:
+        return {
+            "pages": None,
+            "estimated_minutes": None,
+            "poll_after_seconds": _MIN_POLL_SECONDS,
+            "message": (
+                f"'{document_id}' 색인을 시작했습니다(쪽수를 읽지 못해 소요시간 추정 생략). "
+                f"파싱 → 임베딩 → 저장 순으로 진행됩니다. {tail}"
+            ),
+        }
+    seconds = pages * _SECONDS_PER_PAGE
+    minutes = max(1, round(seconds / 60))
+    poll = max(_MIN_POLL_SECONDS, min(_MAX_POLL_SECONDS, round(seconds / 10)))
+    return {
+        "pages": pages,
+        "estimated_minutes": minutes,
+        "poll_after_seconds": poll,
+        "message": (
+            f"'{document_id}' 색인을 시작했습니다({pages}쪽, 대략 {minutes}분 예상). "
+            f"파싱 → 임베딩 → 저장 순으로 진행됩니다. {tail}"
+        ),
+    }
 
 
 def _normalize_page_numbers(pages: int | list[int]) -> list[int]:
@@ -594,11 +644,12 @@ class RagService:
     def _ingest_chunks_unlocked(
         self, document_id: str, chunks: list[Chunk], doc_name: str | None = None,
         fiscal_year: int | None = None, source_path: str | None = None,
-        metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None, embedding_model: str | None = None,
+        metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None,
+        embedding_model: str | None = None, on_progress: ProgressCallback | None = None,
     ) -> dict:
         m = self._indexer(embedding_model, document_id).index_chunks(
             document_id, chunks, doc_name=doc_name, fiscal_year=fiscal_year,
-            source_path=source_path, metadata=metadata,
+            source_path=source_path, metadata=metadata, on_progress=on_progress,
         )
         return {"ok": True, "document_id": document_id, "num_chunks": m.num_chunks, "status": m.status}
 
@@ -624,7 +675,8 @@ class RagService:
 
     def _ingest_pdf_unlocked(
         self, path: str, document_id: str | None = None, fiscal_year: int | None = None,
-        doc_name: str | None = None, metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None, embedding_model: str | None = None,
+        doc_name: str | None = None, metadata: Mapping[str, JsonValue] | DocumentMetadata | None = None,
+        embedding_model: str | None = None, on_progress: ProgressCallback | None = None,
     ) -> dict:
         if not Path(path).exists():
             return {"ok": False, "error": f"PDF 없음: {path}"}
@@ -637,6 +689,8 @@ class RagService:
                          "이미 추출된 청크는 ingest_chunks 사용.",
             }
         doc_id = document_id or Path(path).stem
+        if on_progress is not None:
+            on_progress("파싱", 0, 0)  # 쪽수 기준 진척은 파서가 알려주지 않아 단계만 보고
         chunks, meta = parse_and_chunk(
             path, doc_id, self.config, fiscal_year=fiscal_year, doc_name=doc_name, force=True,
         )
@@ -647,7 +701,9 @@ class RagService:
         return self._ingest_chunks_unlocked(
             doc_id, chunks, doc_name=meta.get("doc_name", doc_name),
             fiscal_year=meta.get("fiscal_year", fiscal_year), source_path=path,
-            metadata=DocumentMetadata(values=metadata_values), embedding_model=embedding_model or self.config.embedding_model,
+            metadata=DocumentMetadata(values=metadata_values),
+            embedding_model=embedding_model or self.config.embedding_model,
+            on_progress=on_progress,
         )
 
     def submit_ingest(
@@ -675,11 +731,16 @@ class RagService:
                 self._release_mutation(token)
                 raise
 
+        def _report(stage: str, processed: int = 0, total: int = 0) -> None:
+            self.jobs.progress(job.job_id, stage, processed, total)
+
         def _run() -> None:
             try:
                 res = self._ingest_pdf_unlocked(
                     path, document_id=document_id, fiscal_year=fiscal_year,
-                    doc_name=doc_name, metadata=metadata, embedding_model=embedding_model or self.config.embedding_model,
+                    doc_name=doc_name, metadata=metadata,
+                    embedding_model=embedding_model or self.config.embedding_model,
+                    on_progress=_report,
                 )
                 if res.get("ok"):
                     self.jobs.finish(job.job_id, res)
@@ -695,7 +756,16 @@ class RagService:
         except Exception:
             self._release_mutation(token)
             raise
-        return {"ok": True, "job_id": job.job_id, "status": "running", "document_id": doc_id}
+        # 안내(쪽수·예상 소요시간)는 스레드를 띄운 뒤 만든다 — 쪽수 읽기가 색인 시작을 늦추지 않게.
+        guidance = _ingest_guidance(doc_id, _pdf_page_count(Path(path)))
+        return {
+            "ok": True,
+            "job_id": job.job_id,
+            "status": "running",
+            "document_id": doc_id,
+            "next_action": "ingest_status(job_id)",
+            **guidance,
+        }
 
     def ingest_status(self, job_id: str) -> dict:
         """submit_ingest로 시작한 색인 작업의 진행 상태."""
