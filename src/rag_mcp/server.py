@@ -11,6 +11,7 @@ service 호출이 루프를 점유하면 다른 도구 호출(list_documents 등
 from __future__ import annotations
 
 from functools import partial
+from pathlib import Path
 
 import anyio
 from mcp.server.fastmcp import FastMCP, Image
@@ -19,8 +20,36 @@ from mcp.types import TextContent
 from .service import RagService
 from .request_models import JsonValue
 
-mcp = FastMCP("rag-mcp")
+# log_level="WARNING"이 중요하다(기본 INFO 금지). mcp 저수준 서버는 요청마다
+# logger.info("Processing request ...")를 **이벤트 루프 스레드에서** stderr로 쓴다
+# (mcp/server/lowlevel/server.py:733). 클라이언트가 stderr를 읽어가지 않으면 파이프 버퍼가
+# 차고 그 write가 블록되면서 서버 전체가 정지한다. 실측(2026-07-31): 기동 79바이트 +
+# 호출당 162바이트 → Windows 파이프 버퍼 4,096바이트를 넘는 25번째 호출에서 무응답.
+mcp = FastMCP("rag-mcp", log_level="WARNING")
 _service: RagService | None = None
+
+
+def redirect_logs_to_file(config) -> Path | None:
+    """서버 로그를 stderr 대신 파일로 보낸다(파이프 블로킹 원천 차단).
+
+    log_level=WARNING으로 평상시 배출량은 거의 0이지만, 경고·트레이스백이 몰리면
+    4KB는 금방 찬다. mcp.run() 직전에 호출해 stderr 파이프를 아예 쓰지 않게 만든다.
+    기동 검사(preflight) 실패는 이 전환 **이전**에 나므로 클라이언트가 그대로 볼 수 있다.
+
+    실패해도 서버는 계속 뜬다(로그 위치보다 서비스 가동이 우선) — 이때 None을 반환하고
+    stderr를 건드리지 않는다.
+    """
+    import sys
+
+    try:
+        log_dir = config.data_dir / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        path = log_dir / "server.log"
+        stream = path.open("a", encoding="utf-8", buffering=1)
+    except OSError:
+        return None
+    sys.stderr = stream
+    return path
 
 
 def service() -> RagService:
@@ -198,6 +227,12 @@ def main() -> None:
                 file=sys.stderr,
                 flush=True,
             )
+
+    # 기동 검사를 통과한 뒤에야 로그를 파일로 돌린다(위 preflight 오류는 클라이언트가 봐야 함).
+    log_path = redirect_logs_to_file(svc.config)
+    # file=None이면 print가 stdout으로 새어 MCP JSON-RPC 스트림을 깨뜨린다 → 반드시 확인.
+    if log_path is not None and sys.__stderr__ is not None:
+        print(f"[rag-mcp] 이후 서버 로그는 {log_path} 에 기록합니다.", file=sys.__stderr__, flush=True)
 
     threading.Thread(target=_warmup, name="warmup", daemon=True).start()
     mcp.run()

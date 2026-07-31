@@ -263,6 +263,32 @@
 - **주의(테스트 환경)**: pymupdf로 만든 합성 PDF는 OpenDataLoader가 청크를 0개 만든다
   (`parse_and_chunk` 직접 호출로 확인 — 코드 문제 아님). 파서 포함 e2e는 실 PDF가 필요하다.
 
+### ✅ 완료 (2026-07-31) — 300초 무응답 근본 원인 확정: stderr 파이프 블로킹
+- **증상(2026-07-30 17:13)**: `ingest_pdf`가 300초 무응답 → 코덱스 타임아웃. 색인 자체는
+  뒤에서 완주(1,064청크 done). 직전 `review_before_ingest` 0.23초, 이후 `list_documents`
+  0.05초로 **그 호출 하나만** 유실되는 모양.
+- **재현 시도(서버 조건)**: 콜드 서버 + 실제 425쪽 PDF + 기존 색인 데이터 복사본으로 실행 →
+  `ingest_pdf` **0.24초** 반환, 13분 만에 1,064청크 완주. **재현 안 됨.**
+  색인 중 `list_documents` 최대 지연 7.77초(Qdrant 저장 단계의 store 락 대기, 임베딩 중엔 0.03~0.05초).
+- **근본 원인(실측으로 확정)**: mcp 저수준 서버가 요청마다
+  `logger.info("Processing request of type ...")`를 **이벤트 루프 스레드에서** stderr로 쓴다
+  (`mcp/server/lowlevel/server.py:733`, FastMCP 기본 log_level=INFO).
+  클라이언트가 stderr를 읽어가지 않으면 파이프 버퍼가 차고 그 write가 블록되며 **서버 전체가 정지**한다.
+  - 계량: 기동 79바이트 + 호출당 162바이트 → 25번째 호출에서 누적 약 4,129바이트
+    = Windows 파이프 기본 버퍼 4,096바이트. **실제로 25번째 호출에서 무응답 확인.**
+  - 대조군(stderr를 읽어가는 클라이언트): 400회 전부 정상(64,879바이트 소비).
+  - 2026-07-30 코덱스 로그 DB의 rag-mcp stderr 기록이 17:11~17:47 비어 있는 것과 정합적.
+- **수정(테스트 먼저 → 206 passed/9 skipped → 커밋)**:
+  1. `server.py`: `FastMCP("rag-mcp", log_level="WARNING")` — 요청마다 나가던 stderr 쓰기 제거.
+  2. `server.py`: `redirect_logs_to_file(config)` 신설. preflight **통과 후·mcp.run() 직전**에
+     stderr를 `<data_dir>/logs/server.log`로 전환해 파이프를 아예 쓰지 않는다.
+     기동 검사 실패는 전환 전이라 클라이언트가 그대로 본다. 파일 못 열면 None 반환 후 stderr 유지.
+     `sys.__stderr__`가 None이면 print를 생략(file=None이면 stdout으로 새어 JSON-RPC가 깨짐).
+- **회귀 테스트**: `test_server_survives_unread_stderr` — stderr를 한 바이트도 안 읽는 클라이언트로
+  60회 호출. 수정 전 25회에서 정지, 수정 후 통과. 무거워서 `RAG_RUN_SERVER_TESTS=1` 게이트.
+- **남은 관찰**: Qdrant 저장 단계에서 store 락 때문에 다른 도구가 최대 7.77초 대기(1,064청크 기준).
+  현재는 허용 범위지만 문서가 더 커지면 재검토 대상.
+
 ## 구현된 모듈 지도 (참고)
 - `config.py` 모델별 컬렉션/차원 · `models.py` Chunk/SearchResult/Manifest
 - `tokenizer.py`(코드/금액 보존)+`sparse.py`(blake2b idx, tf, IDF modifier 전제)
