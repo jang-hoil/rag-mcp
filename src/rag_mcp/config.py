@@ -44,16 +44,44 @@ def validate_document_id(document_id: str) -> str:
     return document_id
 
 
+def find_project_root(start: Path | None = None) -> Path | None:
+    """pyproject.toml이 있는 상위 폴더 = 프로젝트 루트. 없으면 None.
+
+    소스 체크아웃(editable 설치)에서는 항상 찾힌다. 패키지만 배포·설치된 형태에서는
+    마커가 없어 None이 되고, 호출부가 예전처럼 cwd 기준으로 물러선다.
+    """
+    start = (start or Path(__file__).resolve().parent).resolve()
+    for candidate in (start, *start.parents):
+        if (candidate / "pyproject.toml").is_file():
+            return candidate
+    return None
+
+
+def _default_data_dir() -> Path:
+    """데이터 폴더. cwd에 의존하지 않는 것이 핵심이다.
+
+    `./data`(상대경로)를 기본값으로 두면 **서버를 어느 폴더에서 띄웠는지**에 따라
+    데이터 위치가 바뀐다. 2026-07-31 실장애: 코덱스가 자기 설치 폴더에서 서버를 띄워
+    `C:\\Program Files\\...\\app\\data` 생성을 시도하다 PermissionError로 즉사했다.
+    쓰기 가능한 엉뚱한 폴더였다면 빈 인덱스를 조용히 새로 만들어 더 나빴을 것이다.
+    """
+    explicit = os.environ.get("RAG_DATA_DIR", "").strip()
+    if explicit:
+        return Path(explicit).resolve()
+    root = find_project_root()
+    return ((root / "data") if root is not None else Path("./data")).resolve()
+
+
 def _default_qdrant_path() -> Path:
     explicit = os.environ.get("RAG_QDRANT_PATH", "").strip()
     if explicit:
         return Path(explicit).resolve()
-    return (Path(_env("RAG_DATA_DIR", "./data")).resolve() / "qdrant").resolve()
+    return (_default_data_dir() / "qdrant").resolve()
 
 
 @dataclass
 class Config:
-    data_dir: Path = field(default_factory=lambda: Path(_env("RAG_DATA_DIR", "./data")).resolve())
+    data_dir: Path = field(default_factory=_default_data_dir)
     qdrant_mode: str = field(default_factory=lambda: _env("RAG_QDRANT_MODE", "local"))
     qdrant_path: Path = field(default_factory=_default_qdrant_path)
     qdrant_url: str = field(default_factory=lambda: _env("RAG_QDRANT_URL", ""))

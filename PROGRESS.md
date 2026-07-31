@@ -240,7 +240,7 @@
 - **미해결(별건)**: 2026-07-30 17:13 세션 `ingest_pdf` 300초 타임아웃. 그 세션은 경로가 정상이었고
   색인도 완주(1,064청크 done)했으므로 cwd 문제와 무관. `ingest_pdf`는 웜/콜드 서버 모두
   0.04초에 job_id를 반환함을 실측했으므로 **설계가 아니라 응답 배달 실패**. 원인 미확정.
-- **논의 필요**: `Config`가 cwd 대신 프로젝트 루트 기준으로 경로를 풀도록 바꿀지(CLI 동작도 함께 바뀜).
+- **(2026-07-31 해결)** 아래 "데이터 경로를 cwd에서 분리" 항목 참조 — 설정 한 줄 의존을 없앴다.
 
 ### ✅ 완료 (2026-07-31) — 색인 진행 상황 보고 (ingest_pdf 안내문 + ingest_status 진척도)
 - **문제**: `ingest_pdf`는 `job_id`만, `ingest_status`는 `running` 한 단어만 반환 → MCP
@@ -288,6 +288,19 @@
   60회 호출. 수정 전 25회에서 정지, 수정 후 통과. 무거워서 `RAG_RUN_SERVER_TESTS=1` 게이트.
 - **남은 관찰**: Qdrant 저장 단계에서 store 락 때문에 다른 도구가 최대 7.77초 대기(1,064청크 기준).
   현재는 허용 범위지만 문서가 더 커지면 재검토 대상.
+
+### ✅ 완료 (2026-07-31) — 데이터 경로를 cwd에서 분리 (근본 수정)
+- **배경**: `config.toml`에 `RAG_DATA_DIR` 절대경로를 넣어 급한 불은 껐지만, 코드는 여전히
+  `./data`(cwd 상대경로)를 기본값으로 써서 설정이 빠지면 같은 함정에 다시 빠졌다.
+- **수정**: `config.py`에 `find_project_root()` 신설 — `pyproject.toml`이 있는 상위 폴더를 찾는다.
+  `_default_data_dir()`: `RAG_DATA_DIR` > **프로젝트 루트/data** > (마커 없으면) `./data` 폴백.
+  `_default_qdrant_path()`도 같은 함수를 쓰도록 통일(중복 제거).
+- **우선순위 보존**: `RAG_DATA_DIR`·`RAG_QDRANT_PATH` 환경변수가 여전히 최우선이라
+  운영의 config.toml 방식은 그대로 동작한다. 패키지만 설치된 배포 형태(마커 없음)는 기존 동작 유지.
+- **검증**: 테스트 8건 추가(214 passed/9 skipped). `C:\Windows`에서 실행해도
+  `data_dir=D:\User\Desktop\rag mcp\data`로 해석되는 것을 실측(수정 전 `C:\Windows\data`).
+- **주의**: 프로젝트 폴더 자체를 옮기면 데이터도 함께 따라간다(루트 기준이므로). 데이터를
+  다른 위치에 두려면 `RAG_DATA_DIR`를 명시할 것.
 
 ## 구현된 모듈 지도 (참고)
 - `config.py` 모델별 컬렉션/차원 · `models.py` Chunk/SearchResult/Manifest
