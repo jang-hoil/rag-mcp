@@ -184,6 +184,17 @@ async def collection_status() -> dict:
 
 
 @mcp.tool()
+async def set_source_path(document_id: str, source_path: str, force: bool = False) -> dict:
+    """원본 PDF를 옮겼을 때 기록된 경로만 고친다(재색인 없음).
+
+    청크·임베딩·검색은 그대로 두고 원본 위치만 갱신한다. 원본 경로가 끊기면 검색은 되는데
+    **아직 캐시되지 않은 페이지 이미지만** 못 여는 상태가 되는데, 그때 쓰는 도구다.
+    쪽수가 색인 당시와 다르면 다른 문서일 수 있어 거부한다(force=True로 통과).
+    PDF 내용이 바뀐 경우에는 이 도구가 아니라 reindex_document(reparse=True)가 필요하다."""
+    return await _run(service().set_source_path, document_id, source_path, force=force)
+
+
+@mcp.tool()
 async def review_before_ingest(pdf_path: str) -> dict:
     """새 PDF 색인 전 검토(읽기 전용). 들어올 문서 id/연도(파일명 기반)와 현재 색인된 전체
     목록을 함께 반환한다. 삭제·색인·시리즈 매칭을 하지 않는다 — 어떤 구버전을 지울지는 사람이 판단."""

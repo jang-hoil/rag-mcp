@@ -5,6 +5,7 @@ embedding_model이 컬렉션을 결정(저장·검색 모델 일치 강제 — �
 """
 from __future__ import annotations
 
+import json
 import re
 import threading
 import uuid
@@ -17,7 +18,7 @@ from .config import COLLECTION_BY_MODEL, Config, load_config
 from .embeddings import EmbeddingBackend, get_backend
 from .indexer import Indexer, ProgressCallback
 from .jobs import JobStore
-from .manifest import ManifestStore
+from .manifest import ManifestStore, resolve_source_path
 from .models import Chunk
 from .page_render import render_pages
 from .request_models import DocumentMetadata, JsonValue, SearchFilters
@@ -412,22 +413,25 @@ class RagService:
         # 문서도 이미 렌더된 페이지는 계속 볼 수 있어야 한다.
         if missing_pages:
             manifest = self.manifests.read(document_id)
-            source_path = (
-                Path(manifest.source_path)
-                if manifest is not None and manifest.source_path
-                else None
+            # 옛 WSL 경로(`/mnt/d/...`)로 기록된 문서도 파일이 제자리에 있으면 되살린다.
+            source_path = resolve_source_path(
+                manifest.source_path if manifest is not None else None
             )
             if source_path is None or not source_path.exists():
-                pdf_display = str(source_path) if source_path is not None else "매니페스트에 기록 없음"
+                # 해석 결과가 아니라 **매니페스트에 기록된 원문**을 보여준다. 옛 WSL 경로처럼
+                # 기록 자체가 낡은 경우가 있어, 사용자가 무엇을 고쳐야 할지 알아야 한다.
+                recorded = manifest.source_path if manifest is not None else None
+                pdf_display = recorded or "매니페스트에 기록 없음"
                 cache_display = ", ".join(
                     str(page_paths[page])
                     for page in sorted(missing_pages)
                 )
                 raise ValueError(
                     f"문서 '{document_id}'의 요청 페이지에는 PDF와 페이지 캐시가 모두 없습니다. "
-                    f"기대한 PDF 경로: {pdf_display}. "
+                    f"매니페스트에 기록된 PDF 경로: {pdf_display}. "
                     f"기대한 캐시 경로: {cache_display}. "
-                    "PDF를 위 원본 경로에 두면 페이지를 볼 수 있습니다."
+                    "PDF를 위 경로에 두거나, 파일을 옮겼다면 "
+                    "set_source_path(document_id, 새 경로)로 경로만 고치면 됩니다(재색인 불필요)."
                 )
 
             # render_pages의 기존 캐시 경로 규약을 그대로 쓰되 이번 요청의 화면 확인 DPI만
@@ -556,6 +560,80 @@ class RagService:
             "indexed_documents": self.list_documents(),  # 기존 헬퍼 재사용, 가공 없음
             "note": "이 도구는 삭제/색인을 하지 않습니다. 목록을 보고 직접 delete_document → ingest_pdf 하세요.",
         }
+
+    def set_source_path(self, document_id: str, source_path: str, force: bool = False) -> dict:
+        """원본 PDF 위치만 바꿔 기록한다(재색인·재파싱 없음).
+
+        원본을 다른 폴더로 옮기면 청크·임베딩은 멀쩡한데 **아직 캐시되지 않은 페이지
+        이미지만** 렌더할 수 없게 된다(get_page_image가 PDF를 열어야 하므로). 이때 수십 분짜리
+        재색인 대신 경로 한 줄만 고치면 된다.
+
+        안전장치: 엉뚱한 PDF를 물리면 잘못된 페이지가 조용히 나온다. 저장된 파싱 결과에
+        쪽수가 남아 있으면 새 PDF와 대조해 다르면 거부한다(force=True로 통과 가능).
+        """
+        manifest = self.manifests.read(document_id)
+        if manifest is None:
+            available = ", ".join(doc["document_id"] for doc in self.list_documents()) or "없음"
+            return {
+                "ok": False,
+                "error": f"색인된 문서가 아닙니다: {document_id} (사용 가능: {available})",
+            }
+        new_path = Path(source_path)
+        if not new_path.is_file():
+            return {"ok": False, "error": f"PDF 파일이 없습니다: {source_path}"}
+
+        recorded_pages = self._recorded_page_count(document_id)
+        new_pages = _pdf_page_count(new_path)
+        if (
+            not force
+            and recorded_pages is not None
+            and new_pages is not None
+            and recorded_pages != new_pages
+        ):
+            return {
+                "ok": False,
+                "error": (
+                    f"쪽수가 다릅니다 — 색인 당시 {recorded_pages}쪽인데 지정한 PDF는 {new_pages}쪽입니다. "
+                    "다른 문서일 수 있습니다. 같은 문서가 맞으면 force=True로 다시 실행하세요."
+                ),
+                "recorded_pages": recorded_pages,
+                "new_pages": new_pages,
+            }
+
+        token, busy = self._reserve_mutation("set_source_path")
+        if busy:
+            return busy
+        assert token is not None
+        try:
+            previous = manifest.source_path
+            resolved = str(new_path.resolve())
+            self.manifests.update(document_id, source_path=resolved)
+        finally:
+            self._release_mutation(token)
+        return {
+            "ok": True,
+            "document_id": document_id,
+            "previous_source_path": previous,
+            "source_path": resolved,
+            "recorded_pages": recorded_pages,
+            "new_pages": new_pages,
+            "note": "재색인하지 않았습니다. 청크·임베딩·검색 결과는 그대로입니다.",
+        }
+
+    def _recorded_page_count(self, document_id: str) -> Optional[int]:
+        """색인 당시 파서가 남긴 쪽수(parsed JSON). 없으면 None."""
+        parsed_dir = self.config.parsed_doc_dir(document_id)
+        if not parsed_dir.is_dir():
+            return None
+        for candidate in sorted(parsed_dir.glob("*.json")):
+            try:
+                data = json.loads(candidate.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            pages = data.get("number of pages") if isinstance(data, dict) else None
+            if isinstance(pages, int):
+                return pages
+        return None
 
     def delete_document(self, document_id: str, confirm: bool = False) -> dict:
         token, busy = self._reserve_mutation("delete_document")

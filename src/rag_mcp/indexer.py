@@ -15,7 +15,7 @@ from typing import Callable
 
 from .config import Config
 from .embeddings import EmbeddingBackend, get_backend
-from .manifest import ManifestStore
+from .manifest import ManifestStore, resolve_source_path
 from .models import Chunk, Manifest
 from .request_models import DocumentMetadata, JsonValue
 from .sparse import average_document_length
@@ -227,21 +227,23 @@ class Indexer:
         bm25_k1, bm25_b = self._bm25_settings_for_reindex(m)
 
         if reparse:
-            # PDF 재파싱: 원본 경로가 manifest에 있어야 하고 파일이 실제로 존재해야 함
-            if not m.source_path or not Path(m.source_path).exists():
+            # PDF 재파싱: 원본 경로가 manifest에 있어야 하고 파일이 실제로 존재해야 함.
+            # 옛 WSL 경로로 기록됐어도 파일이 제자리면 resolve_source_path가 되살린다.
+            source = resolve_source_path(m.source_path)
+            if source is None or not source.exists():
                 return {"ok": False, "error": f"원본 PDF 없음(reparse 불가): {m.source_path}"}
             from .pipeline import parse_and_chunk
 
             # force=True: parsed JSON 캐시를 버리고 파서를 실제 재실행(캐시 재사용이면 reparse 무의미)
             chunks, meta = parse_and_chunk(
-                m.source_path, document_id, self.config,
+                str(source), document_id, self.config,
                 fiscal_year=m.fiscal_year, doc_name=m.doc_name, force=True,
             )
-            # 사용자 metadata는 PDF에 없으므로 manifest에 보존된 값을 복원(없으면 None)
+            # 되살린 경로를 매니페스트에 굳혀 다음부터 변환 없이 바로 열리게 한다.
             self.index_chunks(
                 document_id, chunks, doc_name=meta.get("doc_name", m.doc_name),
                 fiscal_year=meta.get("fiscal_year", m.fiscal_year),
-                source_path=m.source_path, metadata=(m.meta or None),
+                source_path=str(source), metadata=(m.meta or None),
                 bm25_k1=bm25_k1, bm25_b=bm25_b,
             )
             return {"ok": True, "document_id": document_id, "num_chunks": len(chunks), "reparse": True}

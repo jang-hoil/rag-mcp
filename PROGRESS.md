@@ -322,6 +322,29 @@
 - **주의**: 프로젝트 폴더 자체를 옮기면 데이터도 함께 따라간다(루트 기준이므로). 데이터를
   다른 위치에 두려면 `RAG_DATA_DIR`를 명시할 것.
 
+### ✅ 완료 (2026-08-05) — 원본 PDF 경로(source_path) 복구
+- **증상**: 매니페스트 6건 중 **4건**의 source_path가 옛 WSL 경로(`/mnt/d/...`)로 남아 있어
+  `get_page_image`가 캐시되지 않은 페이지를 렌더하지 못했다. 검색·임베딩·기존 캐시는 정상.
+- **실측 결과 두 부류**: ① 파일은 제자리인데 표기만 WSL식(2건) ② 파일이 다른 폴더로 이동(2건).
+- **수정**:
+  1. `manifest.resolve_source_path()` 신설 — 기록된 경로가 있으면 그대로 쓰고, 없고 `/mnt/<letter>/`
+     형태면 Windows 경로로 바꿔 존재를 확인한다. 둘 다 실패하면 **기록 원문**을 그대로 돌려준다
+     (오류 메시지에 사용자가 저장해 둔 값이 보여야 하므로). `get_page_image`·`reindex(reparse)`에 배선.
+     reparse는 되살린 경로를 매니페스트에 굳힌다.
+  2. `service.set_source_path(document_id, path, force=False)` + 동명의 MCP 도구(**총 10개**) —
+     재색인 없이 경로만 갱신. **안전장치**: parsed JSON의 `number of pages`와 새 PDF의 쪽수가
+     다르면 거부(다른 문서를 물리면 잘못된 페이지가 조용히 나오므로). force=True로 통과 가능.
+  3. `get_page_image` 오류 메시지가 해석 결과 대신 **기록 원문**을 보여주고 복구 방법을 안내.
+- **데이터 복구 실행**: 4건 모두 적용, 쪽수 대조 전부 일치(237/237, 143/143, 533/533, 508/508).
+  백업 `data/manifests.bak-20260805-112137`. 매니페스트만 건드리므로 serve 중에도 안전(Qdrant 미접근).
+  - `2026년 공직윤리 실무과정` → `D:\User\Downloads\...`(이동)
+  - `칠곡군청_2026 통합회계실무교재` → `D:\User\Desktop\...`(이동)
+  - `2025년_공직실무_윤리업무/재산등록` → `D:\User\Desktop\테스트1\...`(제자리, 표기만 변환)
+- **검증**: 테스트 12건 추가(226 passed/9 skipped). 복구 후 캐시에 없던 페이지 실제 렌더 확인
+  (재산등록 50쪽 2000x1500, 공직윤리 300쪽 1545x2095).
+- **기존 테스트 1건 문구 갱신**: `test_get_page_image_missing_pdf_and_cache_has_actionable_korean_error` —
+  오류 메시지 변경에 맞추고 `set_source_path` 안내 확인을 **추가**했다(검증 약화 아님).
+
 ## 구현된 모듈 지도 (참고)
 - `config.py` 모델별 컬렉션/차원 · `models.py` Chunk/SearchResult/Manifest
 - `tokenizer.py`(코드/금액 보존)+`sparse.py`(blake2b idx, tf, IDF modifier 전제)

@@ -161,7 +161,9 @@ def test_get_page_image_missing_pdf_and_cache_has_actionable_korean_error(
     assert "PDF와 페이지 캐시가 모두 없습니다" in message
     assert str(missing_pdf) in message
     assert str(expected_cache) in message
-    assert "PDF를 위 원본 경로에 두면" in message
+    assert "PDF를 위 경로에 두거나" in message
+    # 파일을 옮긴 경우의 복구 수단까지 알려줘야 실제로 행동할 수 있다(재색인 불필요)
+    assert "set_source_path" in message
 
 
 def test_fastmcp_get_page_image_returns_text_and_actual_image_content(
