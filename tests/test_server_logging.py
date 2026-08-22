@@ -74,7 +74,7 @@ def test_server_survives_unread_stderr(tmp_path):
     수정 전에는 25번째 호출에서 정지했다. 여유를 두고 60회를 확인한다.
     """
     project = Path(__file__).resolve().parents[1]
-    exe = project / ".venv" / "Scripts" / "rag-mcp.exe"
+    exe = Path(sys.executable).with_name("rag-mcp.exe")
     if not exe.exists():
         pytest.skip(f"서버 실행 파일 없음: {exe}")
 
