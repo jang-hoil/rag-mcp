@@ -2,14 +2,14 @@
 
 회계·예산 지침서 RAG 서버를 **Claude Desktop**(및 동일 방식의 MCP 클라이언트)에
 stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰이크로 검증됨
-(`initialize` → `tools/list` 10개 → `collection_status` 정상 반환 확인).
+(`initialize` → `tools/list` 11개 → `collection_status` 정상 반환 확인).
 
 ## 1. 동작 방식 (전제)
-- 서버는 `FastMCP("rag-mcp").run()` → **기본 transport = stdio**.
+- 서버는 MCP Python SDK v2의 `MCPServer("rag-mcp").run(transport="stdio")`로 실행된다.
   클라이언트가 서버 프로세스를 직접 띄우고 stdin/stdout으로 JSON-RPC를 주고받는다.
 - stdio에서 **stdout은 프로토콜 전용 채널**. 로그·진단 출력은 반드시 stderr로만
   (cli.py의 시작 메시지는 `file=sys.stderr`로 출력 — 의도된 안전 설계).
-- 기동 순서는 **preflight(동기) → warmup(백그라운드 스레드) → `mcp.run()`** 이다(`server.py:156-194`).
+- 기동 순서는 **preflight(동기) → warmup(백그라운드 스레드) → `mcp.run(transport="stdio")`** 이다.
   - preflight는 Qdrant 저장소를 열어 **중복 인스턴스를 걸러낸다.** 다른 프로세스가 이미
     쥐고 있으면 `StorageBusyError`로 조용히 종료한다(파일락 충돌 방지).
   - KURE 임베딩 모델 적재는 **백그라운드에서 진행**되므로 서버는 즉시 `initialize`에 응답한다.
@@ -54,7 +54,7 @@ stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰�
 수정 후 Claude Desktop을 **완전히 종료 후 재시작**해야 반영된다.
 
 ## 4. 검증
-1. 재시작 후 채팅 입력창의 도구/플러그 아이콘에서 `rag-mcp` 도구 10개가 보이는지 확인.
+1. 재시작 후 채팅 입력창의 도구/플러그 아이콘에서 `rag-mcp` 도구 11개가 보이는지 확인.
 2. CLI 사전 점검(서버가 stdio로 정상 응답하는지 코드로 확인):
    ```
    uv --directory "C:\Users\Owner\Desktop\RAG MCP" run rag-mcp status
@@ -70,7 +70,7 @@ stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰�
    python -c "import json; json.load(open(r'%APPDATA%\Claude\claude_desktop_config.json', encoding='utf-8')); print('OK')"
    ```
 
-## 5. 노출되는 도구 10개
+## 5. 노출되는 도구 11개
 | 도구 | 용도 |
 |---|---|
 | `search_documents` | 하이브리드(dense+sparse RRF) 검색. **`document_id` 필수** — 문서별 컬렉션이라 어느 지침을 볼지 지정해야 한다. 누락 시 사용 가능한 목록을 담은 오류를 돌려준다. `fiscal_year`로 연도 한정 |
@@ -82,6 +82,7 @@ stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰�
 | `delete_document` | 문서 삭제(`confirm=True`만 실제 실행) |
 | `reindex_document` | 재색인(기본 `reparse=False`로 parsed 재사용) |
 | `collection_status` | 컬렉션·연도별 문서수·차원·sparse 여부 |
+| `set_source_path` | 원본 PDF를 옮겼을 때 기록된 경로만 갱신한다. PDF 내용이 바뀐 경우에는 `reindex_document(reparse=True)`를 사용한다 |
 | `review_before_ingest` | **읽기 전용** 검토. 들어올 문서 id/연도(파일명 기반)와 현재 색인된 전체 목록을 함께 반환. 삭제·색인·매칭 없음 — 교체(replace-on-update) 워크플로우에서 사람이 직접 구버전 선별용 |
 
 ### 비동기 색인 워크플로우 (큰 PDF 필수)
