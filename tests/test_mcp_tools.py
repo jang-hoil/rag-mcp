@@ -1,4 +1,4 @@
-"""service.py(도구 10개) 테스트 — FastMCP 비의존, FakeEmbeddingBackend."""
+"""service.py(도구 11개) 테스트 — MCPServer 비의존, FakeEmbeddingBackend."""
 import os
 
 import pytest
@@ -815,17 +815,36 @@ def test_retriever_cache_is_thread_safe(svc, monkeypatch):
     assert len({id(r) for r in results}) == 1, "스레드마다 다른 retriever 인스턴스를 받음"
 
 
-def test_server_imports_and_registers_tools():
-    """FastMCP server가 import되고 페이지 이미지 도구까지 등록되는지."""
+def test_mcp_sdk_v2_server_registers_the_eleven_tools():
+    """SDK v2 MCPServer가 공개 도구 11개를 모두 등록한다."""
     import asyncio
+
     from rag_mcp import server
 
-    names = {t.name for t in asyncio.run(server.mcp.list_tools())}
-    assert {
+    assert type(server.mcp).__name__ == "MCPServer"
+    names = {tool.name for tool in asyncio.run(server.mcp.list_tools())}
+    assert names == {
         "search_documents", "ingest_pdf", "ingest_status", "get_chunk", "list_documents",
         "delete_document", "reindex_document", "collection_status",
-        "review_before_ingest", "get_page_image",
-    } <= names
+        "review_before_ingest", "get_page_image", "set_source_path",
+    }
+
+
+def test_mcp_sdk_v2_client_discovers_server_tools():
+    """SDK v2 Client가 최신 프로토콜로 서버의 도구 목록을 읽는다."""
+    import asyncio
+
+    from mcp import Client
+    from rag_mcp import server
+
+    async def list_tool_names() -> set[str]:
+        async with Client(server.mcp) as client:
+            listing = await client.list_tools()
+            return {tool.name for tool in listing.tools}
+
+    names = asyncio.run(list_tool_names())
+    assert "list_documents" in names
+    assert "get_page_image" in names
 
 
 def test_preflight_detects_duplicate_instance(svc, fake_backend):
@@ -860,6 +879,41 @@ def test_server_main_exits_when_storage_busy(monkeypatch):
     with pytest.raises(SystemExit) as ei:
         server.main()
     assert ei.value.code == 0
+
+
+def test_server_main_runs_mcpserver_over_stdio(monkeypatch):
+    """서버 진입점은 SDK v2의 stdio transport를 명시한다."""
+    import threading
+    from types import SimpleNamespace
+
+    from rag_mcp import server
+
+    calls: list[str] = []
+
+    class ReadyService:
+        config = SimpleNamespace()
+
+        def preflight(self):
+            return None
+
+        def warmup(self):
+            return None
+
+    class ImmediateThread:
+        def __init__(self, *, target, **_kwargs):
+            self._target = target
+
+        def start(self):
+            self._target()
+
+    monkeypatch.setattr(server, "service", lambda: ReadyService())
+    monkeypatch.setattr(server, "redirect_logs_to_file", lambda _config: None)
+    monkeypatch.setattr(threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(server.mcp, "run", lambda *, transport: calls.append(transport))
+
+    server.main()
+
+    assert calls == ["stdio"]
 
 
 def test_server_ingest_pdf_tool_returns_job(tmp_path, monkeypatch):

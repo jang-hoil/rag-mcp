@@ -25,7 +25,7 @@ from rag_mcp.config import Config
 
 
 def test_request_logging_is_not_written_per_call():
-    """FastMCP 기본 log_level(INFO)이면 호출마다 stderr 쓰기가 생긴다 → WARNING으로 고정."""
+    """MCPServer 기본 INFO 로그가 stderr를 막지 않도록 WARNING으로 고정한다."""
     assert server_mod.mcp.settings.log_level == "WARNING"
 
 

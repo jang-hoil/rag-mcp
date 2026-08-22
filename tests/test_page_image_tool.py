@@ -166,7 +166,7 @@ def test_get_page_image_missing_pdf_and_cache_has_actionable_korean_error(
     assert "set_source_path" in message
 
 
-def test_fastmcp_get_page_image_returns_text_and_actual_image_content(
+def test_mcpserver_get_page_image_returns_text_and_actual_image_content(
     tmp_path, monkeypatch
 ):
     """도구 호출 결과에는 경로 문자열만이 아니라 base64 이미지 블록이 포함된다."""
@@ -192,13 +192,15 @@ def test_fastmcp_get_page_image_returns_text_and_actual_image_content(
 
     monkeypatch.setattr(server, "service", lambda: FakeService())
 
-    content = asyncio.run(
+    result = asyncio.run(
         server.mcp.call_tool(
             "get_page_image",
             {"document_id": "문서", "pages": 7},
         )
     )
 
+    assert result.is_error is False
+    content = result.content
     assert len(content) == 2
     assert isinstance(content[0], TextContent)
     assert "document_id: 문서" in content[0].text
@@ -206,5 +208,5 @@ def test_fastmcp_get_page_image_returns_text_and_actual_image_content(
     assert "캐시 사용: 예" in content[0].text
     assert "실제 파일 경로:" in content[0].text
     assert isinstance(content[1], ImageContent)
-    assert content[1].mimeType == "image/png"
+    assert content[1].mime_type == "image/png"
     assert base64.b64decode(content[1].data) == png_bytes

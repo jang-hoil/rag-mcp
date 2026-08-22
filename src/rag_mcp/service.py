@@ -1,6 +1,6 @@
-"""RAG 서비스 계층 — MCP 도구 10개의 비즈니스 로직. 스펙 §5.
+"""RAG 서비스 계층 — MCP 도구 11개의 비즈니스 로직. 스펙 §5.
 
-server.py(FastMCP)·cli.py·테스트가 공통으로 사용한다(MCP 프레임워크 비의존).
+server.py(MCPServer)·cli.py·테스트가 공통으로 사용한다(MCP 프레임워크 비의존).
 embedding_model이 컬렉션을 결정(저장·검색 모델 일치 강제 — 스펙 §11).
 """
 from __future__ import annotations
