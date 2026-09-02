@@ -1,10 +1,10 @@
-"""FastMCP 진입점 — §5 도구 등록. 스펙 §6.10.
+"""MCPServer(SDK v2) 진입점 — §5 도구 등록. 스펙 §6.10.
 
 도구는 service.RagService에 위임한다(로직 단일 출처). 입력 검증·실패 응답은 service가 담당.
 실행: `uv run rag-mcp serve` (cli.py) 또는 `python -m rag_mcp.server`.
 
-동시성: FastMCP는 동기 도구 함수를 이벤트 루프에서 직접 실행한다(func_metadata). 무거운
-service 호출이 루프를 점유하면 다른 도구 호출(list_documents 등)까지 전부 대기·타임아웃한다.
+동시성: 무거운 service 호출이 이벤트 루프를 점유하면 다른 도구 호출(list_documents 등)까지
+전부 대기·타임아웃한다.
 → 모든 도구를 async로 두고 `anyio.to_thread`로 워커 스레드에 오프로딩해 루프를 비운다.
 색인은 submit_ingest로 백그라운드 job화되어 즉시 job_id를 반환한다(ingest_status로 폴링).
 """
@@ -14,7 +14,7 @@ from functools import partial
 from pathlib import Path
 
 import anyio
-from mcp.server.fastmcp import FastMCP, Image
+from mcp.server.mcpserver import Image, MCPServer
 from mcp.types import TextContent
 
 from .service import RagService
@@ -25,7 +25,7 @@ from .request_models import JsonValue
 # (mcp/server/lowlevel/server.py:733). 클라이언트가 stderr를 읽어가지 않으면 파이프 버퍼가
 # 차고 그 write가 블록되면서 서버 전체가 정지한다. 실측(2026-07-31): 기동 79바이트 +
 # 호출당 162바이트 → Windows 파이프 버퍼 4,096바이트를 넘는 25번째 호출에서 무응답.
-mcp = FastMCP("rag-mcp", log_level="WARNING")
+mcp = MCPServer("rag-mcp", log_level="WARNING")
 _service: RagService | None = None
 
 
@@ -246,7 +246,7 @@ def main() -> None:
         print(f"[rag-mcp] 이후 서버 로그는 {log_path} 에 기록합니다.", file=sys.__stderr__, flush=True)
 
     threading.Thread(target=_warmup, name="warmup", daemon=True).start()
-    mcp.run()
+    mcp.run(transport="stdio")
 
 
 if __name__ == "__main__":

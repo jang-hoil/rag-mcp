@@ -25,7 +25,7 @@ from rag_mcp.config import Config
 
 
 def test_request_logging_is_not_written_per_call():
-    """FastMCP 기본 log_level(INFO)이면 호출마다 stderr 쓰기가 생긴다 → WARNING으로 고정."""
+    """MCPServer 기본 INFO 로그가 stderr를 막지 않도록 WARNING으로 고정한다."""
     assert server_mod.mcp.settings.log_level == "WARNING"
 
 
@@ -74,7 +74,7 @@ def test_server_survives_unread_stderr(tmp_path):
     수정 전에는 25번째 호출에서 정지했다. 여유를 두고 60회를 확인한다.
     """
     project = Path(__file__).resolve().parents[1]
-    exe = project / ".venv" / "Scripts" / "rag-mcp.exe"
+    exe = Path(sys.executable).with_name("rag-mcp.exe")
     if not exe.exists():
         pytest.skip(f"서버 실행 파일 없음: {exe}")
 

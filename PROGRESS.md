@@ -10,6 +10,19 @@
 4. `uv run pytest -q`로 현재 통과 상태 확인.
 5. 스펙 §12.2 검증 루프(테스트 먼저 → 구현 → pytest 통과 → 커밋)대로 진행.
 
+## ✅ 완료 (2026-08-22) — MCP Python SDK v2 전환
+- 의존성을 `mcp>=2,<3`으로 올려 MCP Python SDK **2.0.0**을 사용한다.
+- `FastMCP`를 SDK v2의 고수준 `MCPServer`로 교체했다. 저수준 `Server`로 전환하지 않았고,
+  기존 `@mcp.tool()` 함수·`RagService` 위임·Qdrant 동작은 그대로 유지했다.
+- `rag-mcp serve`는 명시적으로 `mcp.run(transport="stdio")`를 호출하며, 실제 등록 도구는
+  `set_source_path`를 포함해 **11개**다.
+- 검증: SDK v2 `Client`의 in-memory 도구 목록 조회, 이미지 `CallToolResult`의
+  `mime_type`, 실제 stdio 서버의 legacy initialize + 읽히지 않는 stderr 60회 호출,
+  `uv lock --check`, 전체 `pytest -q`를 모두 통과했다.
+- 2026-09-02 재검증: Python 3.11 격리 환경에서 전체 테스트와 실제 stdio 회귀 테스트를
+  다시 통과했다. 실데이터로 `initialize` → `tools/list` 11개 → `list_documents` 6건 →
+  `collection_status` 6건 → 신규 색인 `예산편성_사업부서` 검색까지 확인했다.
+
 ## ▶ 다음 할 일 (2026-08-06 이후) — 코덱스에서 실사용 검증
 코드 수정 5건은 **커밋·push 완료**(`origin/master` = `092ca83`, 2026-08-05).
 남은 것은 **코덱스에서 실제로 도는지 눈으로 확인**하는 일뿐이다.
