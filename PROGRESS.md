@@ -19,6 +19,9 @@
 - 검증: SDK v2 `Client`의 in-memory 도구 목록 조회, 이미지 `CallToolResult`의
   `mime_type`, 실제 stdio 서버의 legacy initialize + 읽히지 않는 stderr 60회 호출,
   `uv lock --check`, 전체 `pytest -q`를 모두 통과했다.
+- 2026-09-02 재검증: Python 3.11 격리 환경에서 전체 테스트와 실제 stdio 회귀 테스트를
+  다시 통과했다. 실데이터로 `initialize` → `tools/list` 11개 → `list_documents` 6건 →
+  `collection_status` 6건 → 신규 색인 `예산편성_사업부서` 검색까지 확인했다.
 
 ## ▶ 다음 할 일 (2026-08-06 이후) — 코덱스에서 실사용 검증
 코드 수정 5건은 **커밋·push 완료**(`origin/master` = `092ca83`, 2026-08-05).
