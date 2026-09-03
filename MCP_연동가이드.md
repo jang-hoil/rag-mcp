@@ -10,8 +10,8 @@ stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰�
 - stdio에서 **stdout은 프로토콜 전용 채널**. 로그·진단 출력은 반드시 stderr로만
   (cli.py의 시작 메시지는 `file=sys.stderr`로 출력 — 의도된 안전 설계).
 - 기동 순서는 **preflight(동기) → warmup(백그라운드 스레드) → `mcp.run(transport="stdio")`** 이다.
-  - preflight는 Qdrant 저장소를 열어 **중복 인스턴스를 걸러낸다.** 다른 프로세스가 이미
-    쥐고 있으면 `StorageBusyError`로 조용히 종료한다(파일락 충돌 방지).
+  - local 모드의 preflight는 Qdrant 저장소를 열어 **중복 인스턴스를 걸러낸다.** server
+    모드에서는 각 MCP 프로세스가 같은 Qdrant HTTP 서버에 접속하므로 여러 인스턴스가 가능하다.
   - KURE 임베딩 모델 적재는 **백그라운드에서 진행**되므로 서버는 즉시 `initialize`에 응답한다.
     워밍업이 끝나기 전에 검색을 호출하면 그 호출이 모델 적재를 기다린다.
 
@@ -38,7 +38,11 @@ stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰�
     "run",
     "rag-mcp",
     "serve"
-  ]
+  ],
+  "env": {
+    "RAG_QDRANT_MODE": "server",
+    "RAG_QDRANT_URL": "http://127.0.0.1:6333"
+  }
 }
 ```
 
@@ -47,8 +51,9 @@ stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰�
   있다 → `"command": "uv"`는 "찾을 수 없음" 실패 위험. 절대경로로 회피.
 - **`--directory <프로젝트>`**: cwd 의존 없이 어디서 실행돼도 프로젝트를 찾게 함
   (Claude Desktop이 cwd를 보장하지 않으므로). `cwd` 키 대신 이 방식이 견고.
-- **env 불필요**: SSL은 truststore가 런타임에 Windows 인증서 저장소를 사용하므로
-  `NODE_EXTRA_CA_CERTS` 같은 추가 설정이 필요 없다(Node 서버와 다른 점).
+- **env**: 여러 MCP 앱이 같은 색인을 쓰는 운영 환경에서는 `RAG_QDRANT_MODE=server`와
+  `RAG_QDRANT_URL=http://127.0.0.1:6333`을 지정한다. 모델 다운로드 SSL은 truststore가
+  Windows 인증서 저장소를 사용하므로 `NODE_EXTRA_CA_CERTS`는 필요 없다.
 - **`cmd /c` 래퍼 불필요**: npx(.cmd) 기반 서버와 달리 uv.exe를 직접 실행.
 
 수정 후 Claude Desktop을 **완전히 종료 후 재시작**해야 반영된다.
@@ -92,8 +97,8 @@ stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰�
 1. `ingest_pdf(path=...)` → `{"ok": true, "job_id": "...", "status": "running"}` 즉시 반환.
 2. `ingest_status(job_id)` 를 주기적으로 호출 → `status`가 `done`이면 `result`에 청크수,
    `error`면 `error`에 원인.
-3. 동시 색인은 **1개만** 허용(Qdrant local 단일 writer). 진행 중 또 호출하면 거부되며
-   현재 `job_id`를 알려준다.
+3. 한 MCP 프로세스 안에서는 동시 색인을 **1개만** 허용한다. server 모드의 서로 다른 MCP
+   프로세스는 별도 작업 상태를 가지므로 같은 문서를 양쪽에서 동시에 색인하지 않는다.
 4. job 상태는 인메모리 → 서버 재시작 시 사라지지만, 색인 결과 자체는 manifest에
    영구 저장되므로 `list_documents`로 최종 결과를 확인할 수 있다.
 
@@ -112,21 +117,76 @@ stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰�
 - 깨진 표/뭉친 표는 `needs_image=True` 청크의 page image만 Tesseract OCR로 보강한다.
 - OCR 적용/skip 사유는 manifest와 검색 결과의 `meta.ocr`에 남는다.
 - 로컬 Tesseract가 없으면 OCR은 건너뛰고 `page_image`만 유지된다. 실행 전 `uv run rag-mcp doctor`로 확인한다.
-## 6. 주의사항 (중요)
-- **파일락 / 단일 서버**: Qdrant local path 모드는 다중 프로세스 접근 불가.
-  - Claude Desktop에서 서버가 떠 있는 동안(`serve`) **별도 터미널에서 `rag-mcp ingest`
-    /`status`를 실행하지 말 것** → 파일락 충돌. 색인은 MCP의 `ingest_pdf` 도구로 하거나,
-    서버를 잠깐 내리고 CLI로 한다.
-  - **serve 인스턴스도 1개만.** 수동으로 `rag-mcp serve`를 또 띄우면 Claude Desktop이
-    띄운 것과 충돌한다. 중복 의심 시 `Get-CimInstance Win32_Process | ? CommandLine -like '*rag-mcp*'`
-    로 확인하고 여분을 종료.
+## 6. Qdrant server 모드 (Codex·Claude 동시 사용)
+
+운영값은 다음과 같다.
+
+```text
+실행파일  D:\qdrant\qdrant.exe
+설정파일  D:\qdrant\config\production.yaml
+저장소    D:\qdrant\storage
+URL       http://127.0.0.1:6333
+예약 작업 rag-mcp-qdrant
+```
+
+상태 확인:
+
+```powershell
+Invoke-RestMethod 'http://127.0.0.1:6333/healthz'
+```
+
+기존 local 색인은 모든 `rag-mcp serve` 프로세스를 종료하고 먼저 dry-run한다.
+
+```powershell
+uv run python scripts/migrate_local_to_server.py `
+  --source-path 'D:\User\Desktop\rag mcp\data\qdrant' `
+  --server-storage-path 'D:\qdrant\storage' `
+  --target-url 'http://127.0.0.1:6333'
+```
+
+컬렉션별 포인트 수와 스키마가 맞으면 `--apply`를 붙여 실행한다. `data\qdrant`를 서버
+storage로 직접 파일 복사하지 않는다. 포인트 ID, dense/sparse 벡터와 payload는 API로
+그대로 옮겨지며 재임베딩하지 않는다.
+
+```powershell
+uv run python scripts/migrate_local_to_server.py `
+  --source-path 'D:\User\Desktop\rag mcp\data\qdrant' `
+  --server-storage-path 'D:\qdrant\storage' `
+  --target-url 'http://127.0.0.1:6333' `
+  --apply
+```
+
+자동 실행 작업은 다음처럼 제어한다.
+
+```powershell
+Start-ScheduledTask -TaskName 'rag-mcp-qdrant'
+Stop-ScheduledTask -TaskName 'rag-mcp-qdrant'
+```
+
+server 모드에서는 Codex와 Claude가 각각 stdio MCP 프로세스를 띄워도 같은 Qdrant에
+접속할 수 있다. 단, 작업 레지스트리는 프로세스별이므로 같은 문서를 양쪽에서 동시에
+색인하거나 삭제하지 않는다.
+
+### local 모드 롤백
+
+Codex와 Claude 설정의 타임스탬프 백업을 복원하고 `RAG_QDRANT_MODE`를 `local`로
+되돌리거나 제거하며 `RAG_QDRANT_URL`도 제거한다. 예약 작업을 중지한 뒤 보존된
+`data\qdrant`를 다시 사용한다. local 모드에서는 `rag-mcp serve`를 하나만 실행한다.
+
+## 7. 주의사항 (중요)
+- **local 파일락**: Qdrant local path 모드는 다중 프로세스 접근 불가. 서버 이관 전이나
+  롤백 후에는 Claude Desktop에서 서버가 떠 있는 동안 별도 CLI로 Qdrant를 열지 않는다.
+- **server 중복 변경**: server 모드는 여러 프로세스의 검색을 지원하지만, 같은 문서에 대한
+  동시 색인·삭제는 운영상 피한다.
 - 설정 백업: 본 작업 시 `claude_desktop_config.json.bak` 생성됨(문제 시 복구용).
 
-## 7. 문제 해결
+## 8. 문제 해결
 - 도구가 안 보임 → Claude Desktop 완전 종료 후 재시작. config JSON 유효성 재확인.
 - `uv`/모듈 못 찾음 → command가 uv.exe **절대경로**인지, `--directory` 경로가 맞는지.
 - 검색 시 한글 깨짐 → cli는 stdout UTF-8 강제(처리됨). 클라이언트 측 표시 문제는 별개.
 - 첫 검색이 느림 → 기동 직후에는 백그라운드 워밍업이 끝나기 전일 수 있다. 잠시 뒤 다시 시도.
+- 두 MCP 앱을 같이 쓸 때 파일락 오류 → 두 설정의 `RAG_QDRANT_MODE=server`와 Qdrant
+  `http://127.0.0.1:6333/healthz` 응답을 확인.
 - `search_documents`가 오류 → `document_id`를 지정했는지 확인. 문서별 컬렉션이라 필수다.
   오류 메시지에 사용 가능한 `document_id` 목록이 함께 온다.
 - 검색 결과가 비어 있고 진단 정보만 옴 → 관련도 기준선(`RAG_MIN_DENSE_SCORE`)에 걸린 것.

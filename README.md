@@ -177,6 +177,90 @@ claude mcp add rag-mcp -- "C:\Users\Owner\Desktop\RAG MCP\.venv\Scripts\rag-mcp.
 
 ---
 
+## Codex와 Claude에서 동시에 사용하기
+
+Qdrant local-path 모드는 한 프로세스만 `data\qdrant`를 열 수 있습니다. Codex와 Claude
+Desktop이 각각 `rag-mcp serve`를 실행하면서 같은 색인을 사용하려면 Qdrant를 localhost
+HTTP 서버로 실행합니다. MCP 연결 자체는 계속 stdio이며 도구 11개의 사용법도 바뀌지 않습니다.
+
+### 고정 운영값
+
+| 항목 | 값 |
+|---|---|
+| Qdrant 실행파일 | `D:\qdrant\qdrant.exe` |
+| 설정파일 | `D:\qdrant\config\production.yaml` |
+| 서버 저장소 | `D:\qdrant\storage` |
+| 접속 URL | `http://127.0.0.1:6333` |
+| 작업 스케줄러 | `rag-mcp-qdrant` |
+
+서버 상태는 다음 명령으로 확인합니다.
+
+```powershell
+Invoke-RestMethod 'http://127.0.0.1:6333/healthz'
+```
+
+### 기존 local 색인 이관
+
+`data\qdrant`를 `D:\qdrant\storage`로 파일 복사하면 안 됩니다. 두 저장 방식의 디스크
+포맷이 다르므로 서버를 먼저 실행한 다음 포인트를 Qdrant API로 복사합니다. 이관하는 동안에는
+원본 파일락이 풀리도록 모든 `rag-mcp serve` 프로세스를 종료해야 합니다.
+
+먼저 쓰기가 없는 dry-run을 실행합니다.
+
+```powershell
+uv run python scripts/migrate_local_to_server.py `
+  --source-path 'D:\User\Desktop\rag mcp\data\qdrant' `
+  --server-storage-path 'D:\qdrant\storage' `
+  --target-url 'http://127.0.0.1:6333'
+```
+
+컬렉션 이름·포인트 수·dense/sparse 스키마를 확인한 뒤 실제 복사를 실행합니다.
+
+```powershell
+uv run python scripts/migrate_local_to_server.py `
+  --source-path 'D:\User\Desktop\rag mcp\data\qdrant' `
+  --server-storage-path 'D:\qdrant\storage' `
+  --target-url 'http://127.0.0.1:6333' `
+  --apply
+```
+
+스크립트는 포인트 ID, dense/sparse 벡터와 payload를 그대로 옮기며 재임베딩하지 않습니다.
+대상 컬렉션이 비어 있지 않거나 최종 포인트 수가 다르면 오류로 중단합니다.
+
+### MCP 설정
+
+Codex의 `~/.codex/config.toml`에서는 `[mcp_servers.rag_mcp.env]`에 다음 값을 둡니다.
+
+```toml
+RAG_QDRANT_MODE = "server"
+RAG_QDRANT_URL = "http://127.0.0.1:6333"
+```
+
+Claude Desktop의 `mcpServers["rag-mcp"]`에는 다음 `env`를 병합합니다.
+
+```json
+"env": {
+  "RAG_QDRANT_MODE": "server",
+  "RAG_QDRANT_URL": "http://127.0.0.1:6333"
+}
+```
+
+설정 변경 후 Codex와 Claude Desktop을 완전히 종료했다 다시 실행합니다. 양쪽에서
+`list_documents`와 `collection_status` 결과가 같고 동시에 검색되는지 확인합니다.
+
+### 자동 실행과 롤백
+
+```powershell
+Start-ScheduledTask -TaskName 'rag-mcp-qdrant'
+Stop-ScheduledTask -TaskName 'rag-mcp-qdrant'
+```
+
+문제가 생기면 Codex·Claude 설정 백업을 복원하고 `RAG_QDRANT_MODE`를 `local`로 되돌리거나
+제거한 뒤 `RAG_QDRANT_URL`을 제거합니다. `rag-mcp-qdrant` 작업을 중지하면 보존된
+`data\qdrant`로 즉시 돌아갈 수 있습니다. local 모드에서는 MCP 서버를 하나만 실행합니다.
+
+---
+
 ## 사용하기
 
 ### 색인하기
@@ -271,6 +355,7 @@ PDF ─► 문단·표 단위로 잘라 저장 ─► 질문 ─► 비슷한 �
 | 경로 오류 | JSON에서 `\`를 두 번 썼는지 |
 | 색인이 안 끝남 | 큰 PDF는 수십 분 걸립니다. `ingest_status`로 단계·진척률 확인 |
 | 도구 하나가 무응답 | 서버 로그(`data/logs/server.log`)를 확인 |
+| 두 MCP 앱을 같이 쓰면 파일락 오류 | `RAG_QDRANT_MODE=server`와 Qdrant `/healthz` 확인 |
 | 검색 결과가 이상함 | 문서를 지정했는지 |
 
 더 자세한 내용:
