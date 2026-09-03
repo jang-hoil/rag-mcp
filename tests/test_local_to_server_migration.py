@@ -6,6 +6,7 @@ import pytest
 from qdrant_client import QdrantClient
 from qdrant_client import models
 
+from scripts import migrate_local_to_server as migration
 from scripts.migrate_local_to_server import (
     build_parser,
     inspect_collections,
@@ -183,6 +184,7 @@ def test_parser_defaults_to_dry_run():
 
     assert args.apply is False
     assert args.batch_size == 128
+    assert args.timeout == 60
 
 
 def test_main_rejects_source_path_equal_to_server_storage(tmp_path, capsys):
@@ -221,6 +223,43 @@ def test_main_rejects_non_local_target_url(tmp_path, capsys):
 
     assert result == 2
     assert "localhost" in capsys.readouterr().err
+
+
+def test_main_passes_long_timeout_to_http_client(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    storage = tmp_path / "storage"
+    source.mkdir()
+    storage.mkdir()
+    calls = []
+
+    class ClosableClient:
+        def close(self):
+            pass
+
+    def fake_client(**kwargs):
+        calls.append(kwargs)
+        return ClosableClient()
+
+    monkeypatch.setattr(migration, "_check_health", lambda _url: None)
+    monkeypatch.setattr(migration, "QdrantClient", fake_client)
+    monkeypatch.setattr(migration, "migrate_collections", lambda *args, **kwargs: [])
+
+    result = migration.main(
+        [
+            "--source-path",
+            str(source),
+            "--server-storage-path",
+            str(storage),
+            "--target-url",
+            "http://127.0.0.1:6333",
+        ]
+    )
+
+    assert result == 0
+    assert calls == [
+        {"path": str(source.resolve())},
+        {"url": "http://127.0.0.1:6333", "timeout": 60},
+    ]
 
 
 def test_real_clients_preserve_vectors_and_payloads(tmp_path):

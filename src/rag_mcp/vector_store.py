@@ -29,6 +29,7 @@ class StorageBusyError(RuntimeError):
 
 # chunk_id → 안정 포인트 UUID (재색인 멱등)
 _NAMESPACE = uuid.UUID("a7f3c1e2-0b4d-4e6a-9c8f-1234567890ab")
+QDRANT_SERVER_TIMEOUT_SECONDS = 60
 
 
 def point_id_for(chunk_id: str) -> str:
@@ -43,7 +44,10 @@ def open_qdrant_client(config: Config) -> QdrantClient:
                 "RAG_QDRANT_MODE=server인데 RAG_QDRANT_URL이 비어 있습니다 "
                 "(조용히 local로 폴백하지 않음 — URL을 설정하거나 mode를 local로)."
             )
-        return QdrantClient(url=config.qdrant_url)
+        return QdrantClient(
+            url=config.qdrant_url,
+            timeout=QDRANT_SERVER_TIMEOUT_SECONDS,
+        )
 
     config.qdrant_path.mkdir(parents=True, exist_ok=True)
     try:

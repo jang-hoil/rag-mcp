@@ -17,6 +17,8 @@ from urllib.request import urlopen
 from qdrant_client import QdrantClient
 from qdrant_client import models
 
+from rag_mcp.vector_store import QDRANT_SERVER_TIMEOUT_SECONDS
+
 
 @dataclass(frozen=True)
 class CollectionSummary:
@@ -188,6 +190,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="scroll/upsert 배치 크기(기본 128)",
     )
     parser.add_argument(
+        "--timeout",
+        type=int,
+        default=QDRANT_SERVER_TIMEOUT_SECONDS,
+        help="Qdrant 서버 요청 제한(초, 기본 60)",
+    )
+    parser.add_argument(
         "--apply",
         action="store_true",
         help="실제 컬렉션 생성과 포인트 복사 수행(기본은 dry-run)",
@@ -204,6 +212,8 @@ def _validate_args(args) -> tuple[Path, Path, str]:
         raise ValueError("원본 local 경로와 서버 storage 경로는 같을 수 없습니다")
     if args.batch_size < 1:
         raise ValueError("batch-size는 1 이상이어야 합니다")
+    if args.timeout < 1:
+        raise ValueError("timeout은 1초 이상이어야 합니다")
 
     target_url = args.target_url.rstrip("/")
     parsed = urlparse(target_url)
@@ -246,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         _check_health(target_url)
         source = QdrantClient(path=str(source_path))
-        target = QdrantClient(url=target_url)
+        target = QdrantClient(url=target_url, timeout=args.timeout)
         results = migrate_collections(
             source,
             target,

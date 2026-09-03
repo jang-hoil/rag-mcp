@@ -5,7 +5,12 @@ import pytest
 
 from rag_mcp.config import Config
 from rag_mcp.models import Chunk
-from rag_mcp.vector_store import StorageBusyError, VectorStore, point_id_for
+from rag_mcp.vector_store import (
+    StorageBusyError,
+    VectorStore,
+    open_qdrant_client,
+    point_id_for,
+)
 
 
 def _chunk(cid, text, fy, **kw):
@@ -116,6 +121,26 @@ def test_server_mode_without_url_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("RAG_QDRANT_PATH", str(tmp_path / "qdrant"))
     with pytest.raises(ValueError, match="RAG_QDRANT_URL"):
         VectorStore(Config(), embedding_model="kure", document_id="doc1")
+
+
+def test_server_mode_uses_long_timeout_for_index_creation(tmp_path, monkeypatch):
+    """payload 인덱스 생성이 기본 5초를 넘겨도 서버 클라이언트가 기다린다."""
+    calls = []
+
+    def fake_client(**kwargs):
+        calls.append(kwargs)
+        return object()
+
+    monkeypatch.setattr("rag_mcp.vector_store.QdrantClient", fake_client)
+    config = Config(
+        data_dir=tmp_path,
+        qdrant_mode="server",
+        qdrant_url="http://127.0.0.1:6333",
+    )
+
+    open_qdrant_client(config)
+
+    assert calls == [{"url": "http://127.0.0.1:6333", "timeout": 60}]
 
 
 def test_point_id_stable():
