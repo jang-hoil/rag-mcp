@@ -1,10 +1,17 @@
 """Qdrant local-path 컬렉션을 HTTP 서버로 복사하는 도구 테스트."""
 from types import SimpleNamespace
+import uuid
 
 import pytest
+from qdrant_client import QdrantClient
 from qdrant_client import models
 
-from scripts.migrate_local_to_server import inspect_collections, migrate_collections
+from scripts.migrate_local_to_server import (
+    build_parser,
+    inspect_collections,
+    main,
+    migrate_collections,
+)
 
 
 def _record(point_id: str):
@@ -19,12 +26,21 @@ def _record(point_id: str):
 
 
 class FakeClient:
-    def __init__(self, collections=None, *, drop_upserts=False):
+    def __init__(
+        self,
+        collections=None,
+        *,
+        drop_upserts=False,
+        vector_size=2,
+    ):
         self.records = {
             name: list(points) for name, points in (collections or {}).items()
         }
         self.vectors_config = {
-            "dense": models.VectorParams(size=2, distance=models.Distance.COSINE)
+            "dense": models.VectorParams(
+                size=vector_size,
+                distance=models.Distance.COSINE,
+            )
         }
         self.sparse_vectors_config = {
             "sparse": models.SparseVectorParams(modifier=models.Modifier.IDF)
@@ -101,6 +117,8 @@ def test_dry_run_never_creates_or_upserts():
 
     assert report[0].source_count == 1
     assert report[0].target_count is None
+    assert report[0].vectors_config == source.vectors_config
+    assert report[0].sparse_vectors_config == source.sparse_vectors_config
     assert target.write_calls == []
 
 
@@ -139,3 +157,136 @@ def test_apply_fails_when_final_count_differs():
 
     with pytest.raises(RuntimeError, match="포인트 수 불일치"):
         migrate_collections(source, target, apply=True)
+
+
+def test_apply_rejects_empty_target_with_different_schema_before_writes():
+    source = FakeClient(collections={"rag_one": [_record("p1")]}, vector_size=2)
+    target = FakeClient(collections={"rag_one": []}, vector_size=3)
+
+    with pytest.raises(RuntimeError, match="스키마가 다릅니다"):
+        migrate_collections(source, target, apply=True)
+
+    assert target.write_calls == []
+
+
+def test_parser_defaults_to_dry_run():
+    args = build_parser().parse_args(
+        [
+            "--source-path",
+            "source",
+            "--server-storage-path",
+            "storage",
+            "--target-url",
+            "http://127.0.0.1:6333",
+        ]
+    )
+
+    assert args.apply is False
+    assert args.batch_size == 128
+
+
+def test_main_rejects_source_path_equal_to_server_storage(tmp_path, capsys):
+    result = main(
+        [
+            "--source-path",
+            str(tmp_path),
+            "--server-storage-path",
+            str(tmp_path),
+            "--target-url",
+            "http://127.0.0.1:6333",
+            "--apply",
+        ]
+    )
+
+    assert result == 2
+    assert "같을 수 없습니다" in capsys.readouterr().err
+
+
+def test_main_rejects_non_local_target_url(tmp_path, capsys):
+    source = tmp_path / "source"
+    storage = tmp_path / "storage"
+    source.mkdir()
+    storage.mkdir()
+
+    result = main(
+        [
+            "--source-path",
+            str(source),
+            "--server-storage-path",
+            str(storage),
+            "--target-url",
+            "https://qdrant.example.com",
+        ]
+    )
+
+    assert result == 2
+    assert "localhost" in capsys.readouterr().err
+
+
+def test_real_clients_preserve_vectors_and_payloads(tmp_path):
+    source = QdrantClient(path=str(tmp_path / "source"))
+    target = QdrantClient(path=str(tmp_path / "target"))
+    collection = "rag_real"
+    point_id = str(uuid.uuid4())
+    try:
+        source.create_collection(
+            collection_name=collection,
+            vectors_config={
+                "dense": models.VectorParams(
+                    size=2,
+                    distance=models.Distance.COSINE,
+                )
+            },
+            sparse_vectors_config={
+                "sparse": models.SparseVectorParams(modifier=models.Modifier.IDF)
+            },
+        )
+        source.upsert(
+            collection_name=collection,
+            points=[
+                models.PointStruct(
+                    id=point_id,
+                    vector={
+                        "dense": [0.1, 0.2],
+                        "sparse": models.SparseVector(
+                            indices=[1],
+                            values=[1.0],
+                        ),
+                    },
+                    payload={
+                        "document_id": "실제 문서",
+                        "fiscal_year": 2026,
+                        "text": "보존할 본문",
+                    },
+                )
+            ],
+            wait=True,
+        )
+        stored_source = source.retrieve(
+            collection_name=collection,
+            ids=[point_id],
+            with_payload=True,
+            with_vectors=True,
+        )[0]
+
+        report = migrate_collections(source, target, apply=True)
+
+        copied = target.retrieve(
+            collection_name=collection,
+            ids=[point_id],
+            with_payload=True,
+            with_vectors=True,
+        )[0]
+        assert report[0].target_count == 1
+        assert copied.id == point_id
+        assert copied.vector["dense"] == pytest.approx(
+            stored_source.vector["dense"]
+        )
+        assert copied.vector["sparse"].indices == stored_source.vector["sparse"].indices
+        assert copied.vector["sparse"].values == pytest.approx(
+            stored_source.vector["sparse"].values
+        )
+        assert copied.payload == stored_source.payload
+    finally:
+        source.close()
+        target.close()

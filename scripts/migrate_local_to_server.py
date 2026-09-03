@@ -5,10 +5,16 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import argparse
 from collections.abc import Iterator
+from dataclasses import dataclass
+from pathlib import Path
+import sys
 from typing import Any
+from urllib.parse import urlparse
+from urllib.request import urlopen
 
+from qdrant_client import QdrantClient
 from qdrant_client import models
 
 
@@ -29,6 +35,8 @@ class MigrationResult:
     name: str
     source_count: int
     target_count: int | None
+    vectors_config: Any
+    sparse_vectors_config: Any
 
 
 def inspect_collections(client) -> list[CollectionSummary]:
@@ -65,17 +73,27 @@ def migrate_collections(
                 name=summary.name,
                 source_count=summary.points_count,
                 target_count=None,
+                vectors_config=summary.vectors_config,
+                sparse_vectors_config=summary.sparse_vectors_config,
             )
             for summary in summaries
         ]
 
     for summary in summaries:
-        if (
-            target.collection_exists(summary.name)
-            and target.count(summary.name, exact=True).count > 0
-        ):
+        if not target.collection_exists(summary.name):
+            continue
+        if target.count(summary.name, exact=True).count > 0:
             raise RuntimeError(
                 f"대상 컬렉션이 비어 있지 않아 덮어쓰지 않습니다: {summary.name}"
+            )
+        target_info = target.get_collection(summary.name)
+        target_params = target_info.config.params
+        if (
+            target_params.vectors != summary.vectors_config
+            or target_params.sparse_vectors != summary.sparse_vectors_config
+        ):
+            raise RuntimeError(
+                f"비어 있는 대상 컬렉션의 벡터 스키마가 다릅니다: {summary.name}"
             )
 
     results = []
@@ -119,6 +137,8 @@ def migrate_collections(
                 name=summary.name,
                 source_count=summary.points_count,
                 target_count=target_count,
+                vectors_config=summary.vectors_config,
+                sparse_vectors_config=summary.sparse_vectors_config,
             )
         )
     return results
@@ -138,3 +158,121 @@ def _iter_point_batches(client, collection_name: str, batch_size: int) -> Iterat
             yield points
         if offset is None:
             return
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Qdrant local-path 컬렉션을 localhost Qdrant 서버로 복사"
+    )
+    parser.add_argument(
+        "--source-path",
+        type=Path,
+        required=True,
+        help="기존 Qdrant local 저장 경로",
+    )
+    parser.add_argument(
+        "--server-storage-path",
+        type=Path,
+        required=True,
+        help="Qdrant 서버의 실제 storage 경로(원본 경로 충돌 검사용)",
+    )
+    parser.add_argument(
+        "--target-url",
+        required=True,
+        help="localhost Qdrant HTTP URL(예: http://127.0.0.1:6333)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=128,
+        help="scroll/upsert 배치 크기(기본 128)",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="실제 컬렉션 생성과 포인트 복사 수행(기본은 dry-run)",
+    )
+    return parser
+
+
+def _validate_args(args) -> tuple[Path, Path, str]:
+    source_path = args.source_path.resolve()
+    server_storage_path = args.server_storage_path.resolve()
+    if not source_path.is_dir():
+        raise ValueError(f"원본 Qdrant 경로가 없습니다: {source_path}")
+    if source_path == server_storage_path:
+        raise ValueError("원본 local 경로와 서버 storage 경로는 같을 수 없습니다")
+    if args.batch_size < 1:
+        raise ValueError("batch-size는 1 이상이어야 합니다")
+
+    target_url = args.target_url.rstrip("/")
+    parsed = urlparse(target_url)
+    if parsed.scheme not in {"http", "https"} or parsed.hostname not in {
+        "127.0.0.1",
+        "localhost",
+        "::1",
+    }:
+        raise ValueError("target-url은 localhost Qdrant HTTP 주소여야 합니다")
+    return source_path, server_storage_path, target_url
+
+
+def _check_health(target_url: str) -> None:
+    with urlopen(f"{target_url}/healthz", timeout=5) as response:
+        if response.status != 200:
+            raise RuntimeError(
+                f"Qdrant healthz 응답이 정상이 아닙니다: HTTP {response.status}"
+            )
+
+
+def _configure_utf8_console() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
+
+
+def main(argv: list[str] | None = None) -> int:
+    _configure_utf8_console()
+    args = build_parser().parse_args(argv)
+    try:
+        source_path, _server_storage_path, target_url = _validate_args(args)
+    except ValueError as exc:
+        print(f"[설정 오류] {exc}", file=sys.stderr)
+        return 2
+
+    source = None
+    target = None
+    try:
+        _check_health(target_url)
+        source = QdrantClient(path=str(source_path))
+        target = QdrantClient(url=target_url)
+        results = migrate_collections(
+            source,
+            target,
+            apply=args.apply,
+            batch_size=args.batch_size,
+        )
+        mode = "APPLY" if args.apply else "DRY-RUN"
+        print(f"[{mode}] {len(results)}개 컬렉션")
+        for result in results:
+            target_text = "쓰기 없음" if result.target_count is None else result.target_count
+            print(
+                f"- {result.name}: source={result.source_count}, "
+                f"target={target_text}"
+            )
+            print(f"  dense={result.vectors_config!r}")
+            print(f"  sparse={result.sparse_vectors_config!r}")
+        return 0
+    except Exception as exc:
+        print(f"[이관 오류] {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        if source is not None:
+            source.close()
+        if target is not None:
+            target.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
