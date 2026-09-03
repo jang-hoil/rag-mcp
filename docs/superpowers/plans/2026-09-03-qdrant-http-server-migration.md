@@ -293,7 +293,6 @@ git commit -m "docs: add Qdrant server operations guide"
 **Files outside Git:**
 - Create: `D:\qdrant\qdrant.exe`
 - Create: `D:\qdrant\config\production.yaml`
-- Create: `D:\qdrant\logs\qdrant.log`
 - Create: Windows scheduled task `rag-mcp-qdrant`
 
 - [ ] **Step 1: Download the official Windows release asset**
@@ -319,7 +318,10 @@ Start hidden with `--config-path D:\qdrant\config\production.yaml`, redirect std
 
 - [ ] **Step 4: Register the scheduled task**
 
-Register `rag-mcp-qdrant` for the current user at logon with hidden execution, `MultipleInstances=IgnoreNew`, restart-on-failure, and working directory `D:\qdrant`. Start the task and verify only one `qdrant.exe` process listens on port 6333.
+Register `rag-mcp-qdrant` for the current user at logon with `qdrant.exe` as the direct action,
+hidden execution, `MultipleInstances=IgnoreNew`, restart-on-failure, and working directory
+`D:\qdrant`. Do not use a PowerShell wrapper because stopping the task can leave its child process
+running. Start and stop the task once, then verify only one `qdrant.exe` process listens on port 6333.
 
 ---
 
@@ -403,7 +405,7 @@ Expected: zero failures and no unread-stderr stall.
 
 - [ ] **Step 3: Verify two independent stdio MCP processes**
 
-Start two `rag-mcp.exe serve` processes with server-mode environment variables. For each process, send `initialize`, `notifications/initialized`, `tools/list`, `list_documents`, `collection_status`, and the fixed search query. Verify both expose 11 tools, see identical document/collection counts, and return the “5년간 15억 3,700만 원” result without local lock errors.
+Start two `rag-mcp.exe serve` processes with server-mode environment variables. For each process, send `initialize`, `notifications/initialized`, `tools/list`, `list_documents`, `collection_status`, and the fixed search query. Verify both expose 11 tools, see identical document/collection counts, return relevant “수지개선 효과” evidence in the same chunk order, and produce no local lock errors. Do not require the local-mode top amount because server-side sparse IDF changes ranking.
 
 - [ ] **Step 4: Verify scheduled-start behavior**
 

@@ -24,8 +24,10 @@ stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰�
   - 프로젝트 폴더 경로 — cmd 프롬프트의 커서 왼쪽에 표시됨
 
 ## 3. Claude Desktop 등록
-설정 파일: `%APPDATA%\Claude\claude_desktop_config.json`
-(= `C:\Users\Owner\AppData\Roaming\Claude\claude_desktop_config.json`)
+일반 설치의 설정 파일은 `%APPDATA%\Claude\claude_desktop_config.json`
+(= `C:\Users\Owner\AppData\Roaming\Claude\claude_desktop_config.json`)이다. Microsoft Store
+버전은 `%LOCALAPPDATA%\Packages\Claude_<패키지ID>\LocalCache\Roaming\Claude\claude_desktop_config.json`을
+사용할 수 있으므로 Claude의 **Settings → Developer → Edit Config**로 열린 실제 파일을 수정한다.
 
 `mcpServers` 객체에 **아래 항목만 추가**(기존 서버·preferences는 보존):
 
@@ -148,6 +150,10 @@ uv run python scripts/migrate_local_to_server.py `
 storage로 직접 파일 복사하지 않는다. 포인트 ID, dense/sparse 벡터와 payload는 API로
 그대로 옮겨지며 재임베딩하지 않는다.
 
+server 모드에서는 local에서 무시되던 sparse IDF가 실제 적용되므로 sparse 점수와 상위
+결과 순서가 달라질 수 있다. 이관 검증은 특정 순위를 고정하기보다 같은 컬렉션·포인트 수와
+질의에 맞는 근거 반환 여부를 확인한다.
+
 ```powershell
 uv run python scripts/migrate_local_to_server.py `
   --source-path 'D:\User\Desktop\rag mcp\data\qdrant' `
@@ -157,6 +163,9 @@ uv run python scripts/migrate_local_to_server.py `
 ```
 
 자동 실행 작업은 다음처럼 제어한다.
+
+`rag-mcp-qdrant`는 `D:\qdrant\qdrant.exe`를 직접 실행하고 `IgnoreNew`로 중복 실행을
+차단한다. PowerShell 래퍼는 작업 중지 시 자식 프로세스를 남길 수 있으므로 사용하지 않는다.
 
 ```powershell
 Start-ScheduledTask -TaskName 'rag-mcp-qdrant'
@@ -172,6 +181,22 @@ server 모드에서는 Codex와 Claude가 각각 stdio MCP 프로세스를 띄�
 Codex와 Claude 설정의 타임스탬프 백업을 복원하고 `RAG_QDRANT_MODE`를 `local`로
 되돌리거나 제거하며 `RAG_QDRANT_URL`도 제거한다. 예약 작업을 중지한 뒤 보존된
 `data\qdrant`를 다시 사용한다. local 모드에서는 `rag-mcp serve`를 하나만 실행한다.
+
+### 이 PC 적용·검증 기록 (2026-09-03)
+
+- Qdrant `1.18.2` Windows 바이너리의 SHA-256이 GitHub 릴리스 API의 digest와 일치했다.
+- 기존 local 저장소 백업: `data\qdrant.bak-20260903-150604` — 원본과 파일 8개,
+  `28,778,064`바이트로 일치한다.
+- HTTP 서버 이관 결과: 컬렉션 6개, 총 2,280포인트
+  (`1,064 + 38 + 669 + 370 + 75 + 64`). 전 포인트의 ID, payload, dense/sparse 벡터를
+  local 원본과 대조했다.
+- Codex 설정 백업: `C:\Users\User\.codex\config.toml.bak-qdrant-20260903-151303`.
+- Microsoft Store판 Claude 설정 백업:
+  `C:\Users\User\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json.bak-qdrant-20260903-192013`.
+- `rag-mcp-qdrant` 중지·재시작 후 컬렉션 수가 유지됐고, 중복 시작 요청에도
+  `qdrant.exe`는 1개만 실행됐다.
+- 기본 테스트 241 passed/9 skipped, gated stdio 테스트 4 passed. 독립 stdio MCP 2개가
+  동시에 도구 11개, 문서 6건, 총 2,280포인트와 같은 검색 chunk 순서를 반환했다.
 
 ## 7. 주의사항 (중요)
 - **local 파일락**: Qdrant local path 모드는 다중 프로세스 접근 불가. 서버 이관 전이나

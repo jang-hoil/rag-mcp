@@ -227,6 +227,10 @@ uv run python scripts/migrate_local_to_server.py `
 스크립트는 포인트 ID, dense/sparse 벡터와 payload를 그대로 옮기며 재임베딩하지 않습니다.
 대상 컬렉션이 비어 있지 않거나 최종 포인트 수가 다르면 오류로 중단합니다.
 
+server 모드에서는 sparse IDF가 실제 적용됩니다(local 모드에서는 무시됨). 따라서 같은 질문도
+sparse 점수와 상위 결과 순서가 달라질 수 있으며, 이는 데이터 손상이 아니라 검색 계산 방식이
+정상적으로 달라진 결과입니다.
+
 ### MCP 설정
 
 Codex의 `~/.codex/config.toml`에서는 `[mcp_servers.rag_mcp.env]`에 다음 값을 둡니다.
@@ -245,10 +249,18 @@ Claude Desktop의 `mcpServers["rag-mcp"]`에는 다음 `env`를 병합합니다.
 }
 ```
 
+Microsoft Store판 Claude는 설정 파일이 `%APPDATA%`가 아니라
+`%LOCALAPPDATA%\Packages\Claude_<패키지ID>\LocalCache\Roaming\Claude` 아래에 있을 수
+있습니다. Claude의 **Settings → Developer → Edit Config**로 열린 파일을 기준으로 수정합니다.
+
 설정 변경 후 Codex와 Claude Desktop을 완전히 종료했다 다시 실행합니다. 양쪽에서
 `list_documents`와 `collection_status` 결과가 같고 동시에 검색되는지 확인합니다.
 
 ### 자동 실행과 롤백
+
+예약 작업 `rag-mcp-qdrant`는 `qdrant.exe`를 직접 실행하고 `IgnoreNew`로 중복 기동을
+차단합니다. PowerShell 래퍼를 두면 작업 중지 시 자식 Qdrant가 남을 수 있으므로 사용하지
+않습니다.
 
 ```powershell
 Start-ScheduledTask -TaskName 'rag-mcp-qdrant'
