@@ -23,7 +23,72 @@
   다시 통과했다. 실데이터로 `initialize` → `tools/list` 11개 → `list_documents` 6건 →
   `collection_status` 6건 → 신규 색인 `예산편성_사업부서` 검색까지 확인했다.
 
-## ▶ 다음 할 일 (2026-08-06 이후) — 코덱스에서 실사용 검증
+## ✅ 완료 (2026-09-03) — Qdrant local → server 전환
+
+- Qdrant `1.18.2`를 `D:\qdrant`에 설치하고 localhost(`127.0.0.1:6333`)로만 실행했다.
+- `data\qdrant.bak-20260903-150604` 백업은 원본과 파일 수·바이트 수가 일치한다.
+- local 컬렉션 6개·총 2,280포인트를 재임베딩 없이 HTTP 서버로 이관했고, 전 포인트의
+  ID·payload·dense/sparse 벡터를 원본과 대조했다.
+- Codex와 Microsoft Store판 Claude 설정 및 사용자 환경변수를 server 모드로 전환했다.
+- 로그인 예약 작업 `rag-mcp-qdrant`는 `qdrant.exe`를 직접 실행하며 중복 실행을 차단한다.
+- 검증: 기본 테스트 241 passed/9 skipped, gated stdio 4 passed, 독립 MCP 2개에서 도구 11개·
+  문서 6건·총 2,280포인트와 동일한 검색 chunk 순서를 확인했다.
+- 구현과 운영 문서는 `master`에 병합·push 완료했다.
+
+**목적**: local path 모드는 파일락 때문에 한 프로세스만 저장소를 열 수 있다
+(코덱스·Claude·CLI 동시 사용 불가). Qdrant 서버 하나만 파일을 열고 나머지는
+`http://127.0.0.1:6333` HTTP로 붙는 구조로 바꾼다. **PC 내부 통신이라 외부로 나가지 않는다.**
+
+**사용자 확정 사항 (2026-08-10)**
+- 설치 위치: **`D:\qdrant\`** (프로젝트 밖) — exe `D:\qdrant\qdrant.exe`, 저장소 `D:\qdrant\storage`.
+  기존 `data\qdrant`(26MB)는 **손대지 않고 백업으로 남긴다.**
+- Windows **로그인 시 자동 실행**: 작업 스케줄러로 등록(창 없이 백그라운드).
+- Docker 없음 → Windows 실행파일 방식.
+
+**사전 확인된 사실**
+- 코드는 이미 server 모드 지원: `vector_store.open_qdrant_client()`가
+  `RAG_QDRANT_MODE=server` + `RAG_QDRANT_URL`이면 `QdrantClient(url=...)`를 연다.
+  URL이 비면 조용한 local 폴백 없이 ValueError.
+- Qdrant 공식 Windows 바이너리 존재: GitHub releases `qdrant-x86_64-pc-windows-msvc.zip`
+  (최신 v1.19.0 확인). 설치 프로그램 아님 — zip 풀면 exe.
+- 설치된 `qdrant-client`는 **1.18.0** → 버전 경고를 피하려면 서버도 **v1.18.x**를 받는 편이 낫다.
+- 현재 컬렉션 **4개**(manifest는 6건): `data/qdrant/collection/` 목록 참조.
+
+**⚠️ 반드시 지킬 것**
+1. **`data\qdrant` 폴더를 서버 storage로 복사하면 안 된다.** local 모드는 qdrant-client
+   자체 포맷이라 서버 저장 포맷과 다르다. → **포인트를 읽어 HTTP로 다시 넣는 이관 스크립트**가 필요하다
+   (`scripts/migrate_to_per_doc_collections.py`와 같은 방식: `scroll(with_vectors=True)` →
+   `create_collection`(dense COSINE 1024 + sparse IDF) → `upsert`. **재임베딩 없음**).
+   신규 `scripts/migrate_local_to_server.py`로 작성 — 기본 dry-run, `--apply`에서만 쓰기, 청크 수 대조.
+2. **이관 중에는 MCP serve를 모두 종료**해야 local 파일락이 풀린다(코덱스·Claude 창 닫기).
+3. **행동 변화 예고**: server 모드에서는 sparse **IDF modifier가 실제로 동작**한다(local은 무시).
+   → sparse 점수·검색 순위가 조금 바뀐다. 대체로 개선이지만 "결과 동일" 보장은 없다.
+   payload 인덱스(`fiscal_year`·`document_id`)도 server에서는 실제로 생성된다(local은 no-op).
+4. `service.preflight()`의 단일 인스턴스 판정은 local 파일락에 기대던 장치라
+   **server 모드에서는 중복 실행을 못 막는다**(락이 없으니 그냥 통과). 중복 spawn이 더 이상
+   해롭지 않으므로 그대로 둬도 되지만, 동작이 달라진다는 점은 알고 있을 것.
+
+**작업 순서**
+1. `qdrant-x86_64-pc-windows-msvc.zip`(v1.18.x) 내려받아 `D:\qdrant\`에 풀기 →
+   수동 실행해 `http://127.0.0.1:6333/healthz` 응답 확인. 저장소 경로는
+   `QDRANT__STORAGE__STORAGE_PATH=D:\qdrant\storage`(또는 `config/config.yaml`)로 고정.
+2. `data\qdrant` 전체를 별도 위치로 **백업** (`data/qdrant.bak-<날짜>`).
+3. `scripts/migrate_local_to_server.py` 작성(테스트 먼저) → dry-run으로 4개 컬렉션·청크 수 확인 →
+   `--apply`. 이관 후 서버에서 컬렉션별 points 수 대조.
+4. 설정 전환 3곳 — 값은 `RAG_QDRANT_MODE=server`, `RAG_QDRANT_URL=http://127.0.0.1:6333`.
+   - `~/.codex/config.toml` `[mcp_servers.rag_mcp.env]` (기존 `RAG_DATA_DIR` 유지, 백업 후 편집)
+   - `%APPDATA%\Claude\claude_desktop_config.json` `mcpServers.rag-mcp.env` (백업 후 병합)
+   - CLI: 사용자 환경변수(`setx`) — GUI 앱은 재로그인 후 반영됨
+5. 작업 스케줄러 등록(로그온 시 실행, 창 숨김) + 해제 명령을 문서에 남기기.
+6. 검증: 코덱스와 Claude를 **동시에** 켜고 양쪽에서 `list_documents`·검색 → 락 충돌 없이 동작 확인.
+   기존 검색 회귀도 확인("칠곡군 타당성검토에서 수지개선 효과" → 5년간 15억 3,700만 원).
+7. README·MCP_연동가이드.md에 server 모드 운영법 반영 후 커밋.
+
+**롤백**: 환경변수/설정에서 `RAG_QDRANT_MODE`만 지우면(또는 `local`) 즉시 옛 `data\qdrant`로 복귀.
+
+---
+
+## 이전 할 일 (2026-08-06 이후) — 코덱스에서 실사용 검증
 코드 수정 5건은 **커밋·push 완료**(`origin/master` = `092ca83`, 2026-08-05).
 남은 것은 **코덱스에서 실제로 도는지 눈으로 확인**하는 일뿐이다.
 
