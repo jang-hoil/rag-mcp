@@ -13,6 +13,13 @@ from rag_mcp.embeddings import EmbeddingBackend
 from rag_mcp.tokenizer import tokenize
 
 
+@pytest.fixture(autouse=True)
+def isolate_qdrant_environment(monkeypatch):
+    """테스트가 사용자 계정의 운영 server 설정을 상속하지 않게 한다."""
+    monkeypatch.delenv("RAG_QDRANT_MODE", raising=False)
+    monkeypatch.delenv("RAG_QDRANT_URL", raising=False)
+
+
 class FakeEmbeddingBackend(EmbeddingBackend):
     name = "kure"
     dimension = 1024
