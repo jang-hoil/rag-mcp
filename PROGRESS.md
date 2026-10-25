@@ -10,6 +10,16 @@
 4. `uv run pytest -q`로 현재 통과 상태 확인.
 5. 스펙 §12.2 검증 루프(테스트 먼저 → 구현 → pytest 통과 → 커밋)대로 진행.
 
+## 2026-10-25 — 중첩 본문 색인 누락 방지
+
+- 사용자 승인 설계에 따라 `ParsedDoc.iter_blocks()`에서 중첩 `text block`만 읽기 순서대로 펼치도록 수정. 표·목록 내부는 유지하며, 자식에게 없는 페이지는 가장 가까운 상위 컨테이너에서 상속하고 원본 트리는 수정하지 않음.
+- 직접 content만 가진 text block은 문단으로 처리. content와 kids가 함께 있는 미확인 구조는 명시적인 ValueError로 알림.
+- 회귀 테스트 12건 추가. 변경 전 RED 8 failed/4 passed, 변경 후 12 passed. 전체 `uv run pytest -o addopts='' -q`: **253 passed, 9 skipped**, 기존 Qdrant local payload-index 경고 1건.
+- IBMS 원본 중첩 JSON 백업 두 종을 읽기 전용으로 처리하여 120/116청크가 현재 보정본과 본문·페이지·제목 경로·표/금액/코드 플래그까지 일치함을 확인. 민방위 현재 평면 보정본 1,016청크도 호환 확인. 운영 data·Qdrant 재색인·모델 다운로드 없음.
+- 주의: 민방위의 기존 백업 JSON 파일은 매니페스트이며 원래 중첩 트리가 아님. 과거 보정 스크립트가 같은 이름의 원본 JSON과 매니페스트를 동일 폴더에 복사한 것으로 보임. 이번 검증은 민방위 원본 중첩 구조 재현을 주장하지 않음.
+- 실제 Orca orchestration Run `run_573939275c6c`에서 진단·검증·구현 작업을 배정했으나 Codex 준비 단계 timeout, Claude 세션 사용량 제한으로 수행 불가. 해당 작업자를 종료·정리하고 사용자가 승인한 범위를 조정자가 직접 구현·검증함. 독립 작업자 코드 검토는 수행하지 못함.
+- 설계/계획: `docs/superpowers/{specs,plans}/2026-10-25-nested-text-block*.md`. 검증 스크립트·결과: `work/orchestration_20261025/`. 실행 중인 MCP 서버에는 재시작 후 코드 반영.
+
 ## ✅ 완료 (2026-08-22) — MCP Python SDK v2 전환
 - 의존성을 `mcp>=2,<3`으로 올려 MCP Python SDK **2.0.0**을 사용한다.
 - `FastMCP`를 SDK v2의 고수준 `MCPServer`로 교체했다. 저수준 `Server`로 전환하지 않았고,

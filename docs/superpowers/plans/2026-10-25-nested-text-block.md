@@ -35,7 +35,7 @@ text block만 펼치고 표·목록을 원자적으로 유지한다. 원본을 �
 - Consumers verified: `build_chunks(parsed, ...) -> list[Chunk]`,
   `extract_doc_meta(parsed, ...) -> dict[str, Any]`.
 
-- [ ] **Step 1: 누락을 잡는 실제 실패 테스트 작성.**
+- [x] **Step 1: 누락을 잡는 실제 실패 테스트 작성.**
 
 다음과 같이 외부 PDF·Java·모델·DB 없이 실제 ParsedDoc을 생성한다.
 
@@ -87,13 +87,13 @@ content만 있는 컨테이너의 문단 생성, content+kids의 명시적 Value
 빈 컨테이너와 dict가 아닌 항목 무시. page number가 명시적으로 None인 자식도
 누락된 페이지와 같이 상속하는 사례를 포함한다.
 
-- [ ] **Step 2: 실패를 관찰.**
+- [x] **Step 2: 실패를 관찰.**
 
 Run: `uv run pytest tests/test_nested_text_blocks.py -q`.
 Expected: 중첩 본문/페이지/메타데이터 테스트에서 현재 구현의 누락을 보여주는 FAIL.
 보고서에 명령, 종료 코드, 실패 이유를 기록한다. import 등 환경 오류를 RED로 세지 않는다.
 
-- [ ] **Step 3: 최소 구현.**
+- [x] **Step 3: 최소 구현.**
 
 다음 형태의 반복 순회로 읽기 순서를 유지한다. 필요한 경우 이름과 배치만 기존 스타일에 맞춘다.
 
@@ -121,14 +121,14 @@ def iter_blocks(self) -> Iterator[dict[str, Any]]:
         yield node
 ```
 
-- [ ] **Step 4: GREEN과 통합 확인.**
+- [x] **Step 4: GREEN과 통합 확인.**
 
 Run: `uv run pytest tests/test_nested_text_blocks.py -q`.
 Expected: 새 회귀 테스트 전체 PASS. 이어서 `uv run pytest -q` 전체 PASS.
 원본 백업 JSON과 메모리 안에서 text block만 풀어 만든 기준 구조를 비교해
 청크 텍스트·표·페이지·제목 경로·연도 값의 동등성을 확인한다. 운영 파일 쓰기 금지.
 
-- [ ] **Step 5: 검토와 커밋.**
+- [x] **Step 5: 검토와 커밋.**
 
 구현 작업자는 변경 파일과 RED/GREEN/전체 테스트 근거를 보고하고 git 조작은 하지 않는다.
 조정자가 diff 및 독립 검토를 확인하고 필요한 수정은 구현 작업자에게 전달한다.
@@ -139,7 +139,12 @@ PROGRESS.md에는 이번 완료 기록만 추가하며 기존 사용자 변경�
 
 - [x] 설계 승인: 사용자가 “이 설계로 구현 진행” 선택.
 - [x] 변경 전 전체 테스트: `uv run pytest -q`, exit 0.
-- [ ] Task 1 구현 및 RED/GREEN.
-- [ ] 독립 diff 검토.
-- [ ] 원본 백업 비교 및 최종 전체 테스트.
-- [ ] 문서 갱신과 커밋.
+- [x] Task 1 구현 및 RED/GREEN: 8 failed/4 passed → 12 passed.
+- [x] diff 직접 검토. 독립 작업자 검토는 Codex 준비 실패·Claude 사용량 제한으로 수행 불가.
+- [x] IBMS 원본 백업 두 종 비교, 민방위 현재 평면 보정본 호환성, 최종 전체 253 passed/9 skipped.
+- [x] 문서 갱신과 커밋. 구현 체크포인트에서 이번 변경만 기록.
+
+Orca 작업자 세 종 모두 실제 세션 사용량 제한 응답 후 종료·정리했으며,
+사용자가 승인한 범위는 조정자가 직접 구현했다. 비교 스크립트는 처음에 원본 백업
+세 종을 기대했으나, 민방위 백업 JSON이 트리가 아닌 매니페스트임을 확인했다.
+IBMS 원본 두 종의 누락 복구와 민방위 현재 평면 입력의 호환성을 분리해 검증했다.

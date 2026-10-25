@@ -7,7 +7,7 @@
   (reindex reparse=False는 이 산출물 대신 chunks.jsonl을 재사용한다.)
 
 JSON 트리 구조(전제, 샘플 PDF로 확인):
-- 루트 dict: `number of pages`, `kids`(reading-order 평면 블록 리스트).
+- 루트 dict: `number of pages`, `kids`(reading-order 블록 리스트, text block 중첩 가능).
 - 블록 타입: heading/paragraph/list/table/image/caption.
 - heading: `heading level`(Doctitle|Subtitle), `content`, `page number`.
 - table: `number of rows/columns`, `rows`[].`cells`[] (각 셀 `row/column number`, `row/column span`, `kids`에 내용).
@@ -69,10 +69,30 @@ class ParsedDoc:
         return self.tree.get("title")
 
     def iter_blocks(self) -> Iterator[dict[str, Any]]:
-        """루트 kids를 reading order대로 순회 (표/리스트는 atomic 블록으로 그대로 yield)."""
-        for node in self.tree.get("kids", []) or []:
-            if isinstance(node, dict):
-                yield node
+        """text block만 펼쳐 읽기 순서로 순회하고 표/리스트는 원자적으로 유지한다.
+
+        누락된 페이지는 상위 컨테이너에서 상속하되 원본 트리는 수정하지 않는다.
+        """
+        pending = [(node, None) for node in reversed(self.tree.get("kids", []) or [])]
+        while pending:
+            node, inherited_page = pending.pop()
+            if not isinstance(node, dict):
+                continue
+            page = node.get("page number")
+            if page is None:
+                page = inherited_page
+            if node.get("type") == "text block":
+                kids = node.get("kids", []) or []
+                has_content = bool(str(node.get("content") or "").strip())
+                if has_content and kids:
+                    raise ValueError("text block has both content and kids")
+                if not has_content:
+                    pending.extend((child, page) for child in reversed(kids))
+                    continue
+                node = {**node, "type": "paragraph"}
+            if page is not None and node.get("page number") is None:
+                node = {**node, "page number": page}
+            yield node
 
 
 def cell_text(cell: dict[str, Any]) -> str:
