@@ -20,6 +20,7 @@ from .indexer import Indexer, ProgressCallback
 from .jobs import JobStore
 from .manifest import ManifestStore, resolve_source_path
 from .models import Chunk
+from .mutation_lock import DataMutationLock
 from .page_render import render_pages
 from .request_models import DocumentMetadata, JsonValue, SearchFilters
 from .retrieval import Retriever
@@ -165,11 +166,12 @@ class RagService:
         self._indexers: dict[tuple[str, str], Indexer] = {}
         self._qdrant_client = None
         self.manifests = ManifestStore(self.config)
-        # 비동기 ingest: 백그라운드 job 추적 + 동시 ingest 1개 제한(Qdrant local 단일 writer 전제)
+        # 비동기 job 추적과 같은 데이터 폴더의 MCP/CLI 전체 쓰기 1개 제한.
         self.jobs = JobStore()
         self._submit_lock = threading.Lock()
         self._mutation_state_lock = threading.Lock()
         self._active_mutation: dict[str, str | None] | None = None
+        self._data_mutation_lock = DataMutationLock(self.config.data_dir)
         # retriever/indexer 캐시 빌드 보호. 백그라운드 ingest 스레드와 메인 검색 스레드가
         # 같은 모델의 VectorStore(Qdrant local client)를 동시에 두 개 열어 파일락이 충돌하는 것을 막는다.
         # _indexer가 락을 쥔 채 _retriever를 재호출하므로 재진입 가능한 RLock을 쓴다.
@@ -268,6 +270,15 @@ class RagService:
                     "error": "다른 쓰기 작업이 진행 중입니다. 완료 후 다시 시도하세요.",
                     **active,
                 }
+            if not self._data_mutation_lock.try_acquire():
+                return None, {
+                    "ok": False,
+                    "status": "busy",
+                    "error": (
+                        "같은 데이터 폴더의 다른 MCP/CLI에서 쓰기 작업이 진행 중입니다. "
+                        "완료 후 다시 시도하세요."
+                    ),
+                }
             token = uuid.uuid4().hex
             self._active_mutation = {
                 "token": token,
@@ -284,6 +295,7 @@ class RagService:
     def _release_mutation(self, token: str) -> None:
         with self._mutation_state_lock:
             if self._active_mutation and self._active_mutation["token"] == token:
+                self._data_mutation_lock.release()
                 self._active_mutation = None
 
     # --- 도구 ---
@@ -791,8 +803,8 @@ class RagService:
         """PDF 색인을 백그라운드 스레드로 던지고 즉시 job_id를 반환(비블로킹).
 
         큰 PDF의 동기 색인은 임베딩만으로 수 분이 걸려 MCP 클라이언트 타임아웃을 넘긴다.
-        진행 상황은 ingest_status(job_id)로 폴링한다. Qdrant local 단일 writer 전제상
-        동시 색인은 1개만 허용한다.
+        진행 상황은 ingest_status(job_id)로 폴링한다. 같은 데이터 폴더의 MCP·CLI 전체에서
+        변경 작업은 1개만 허용하고, 후발 요청에는 즉시 busy를 반환한다.
         """
         if not Path(path).exists():
             return {"ok": False, "error": f"PDF 없음: {path}"}

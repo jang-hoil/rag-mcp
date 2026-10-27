@@ -10,6 +10,7 @@ venv/
 data/qdrant/
 data/parsed/
 data/manifests/
+data/.locks/
 *.png
 
 # 모델 캐시

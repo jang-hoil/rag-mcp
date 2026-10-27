@@ -99,13 +99,14 @@ stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰�
 1. `ingest_pdf(path=...)` → `{"ok": true, "job_id": "...", "status": "running"}` 즉시 반환.
 2. `ingest_status(job_id)` 를 주기적으로 호출 → `status`가 `done`이면 `result`에 청크수,
    `error`면 `error`에 원인.
-3. 한 MCP 프로세스 안에서는 동시 색인을 **1개만** 허용한다. server 모드의 서로 다른 MCP
-   프로세스는 별도 작업 상태를 가지므로 같은 문서를 양쪽에서 동시에 색인하지 않는다.
+3. 같은 `RAG_DATA_DIR`를 사용하는 MCP·CLI 전체에서 쓰기 작업을 **1개만** 허용한다.
+   server 모드의 별도 프로세스가 같은 문서를 동시에 요청해도 후발 요청은 `status="busy"`로
+   즉시 반환된다. 자동 대기열은 없으므로 먼저 시작한 작업이 끝난 뒤 다시 요청한다.
 4. job 상태는 인메모리 → 서버 재시작 시 사라지지만, 색인 결과 자체는 manifest에
    영구 저장되므로 `list_documents`로 최종 결과를 확인할 수 있다.
 
 `ingest_pdf`는 전달한 PDF를 매번 새로 파싱한 뒤 색인한다. 색인 중에는 다른 변경 작업
-(`ingest_pdf`, `ingest_chunks`, `delete_document`, `reindex_document`)이 실행되지 않고
+(`ingest_pdf`, `ingest_chunks`, `delete_document`, `reindex_document`, `set_source_path`)이 실행되지 않고
 `status="busy"` 응답을 반환하므로, 현재 작업이 끝난 뒤 다시 호출한다. 검색·조회 도구는
 색인 중에도 계속 사용할 수 있다.
 
@@ -173,8 +174,13 @@ Stop-ScheduledTask -TaskName 'rag-mcp-qdrant'
 ```
 
 server 모드에서는 Codex와 Claude가 각각 stdio MCP 프로세스를 띄워도 같은 Qdrant에
-접속할 수 있다. 단, 작업 레지스트리는 프로세스별이므로 같은 문서를 양쪽에서 동시에
-색인하거나 삭제하지 않는다.
+접속할 수 있다. 같은 실제 `RAG_DATA_DIR`에 있는 OS 파일 잠금이 쓰기 작업 전체를
+보호한다. 파싱 시작 전부터 DB·청크·매니페스트 저장 완료까지 잠그며, 실패나 프로세스
+종료 시 해제된다. 잠금 파일 `data/.locks/mutation.lock`은 정상적으로 남아 있으므로
+삭제하지 않는다. 파일이 있다는 사실 자체는 작업 중이라는 뜻이 아니다.
+job 상태는 여전히 프로세스별이므로 `ingest_status`는 작업을 시작한 MCP에서 조회한다.
+코드 업데이트 후 모든 MCP 인스턴스를 재시작한다. 별도 데이터 폴더나 별도 PC에서
+같은 Qdrant를 공유하는 분산 쓰기는 이 잠금으로 보호되지 않는다.
 
 ### local 모드 롤백
 
@@ -201,8 +207,9 @@ Codex와 Claude 설정의 타임스탬프 백업을 복원하고 `RAG_QDRANT_MOD
 ## 7. 주의사항 (중요)
 - **local 파일락**: Qdrant local path 모드는 다중 프로세스 접근 불가. 서버 이관 전이나
   롤백 후에는 Claude Desktop에서 서버가 떠 있는 동안 별도 CLI로 Qdrant를 열지 않는다.
-- **server 중복 변경**: server 모드는 여러 프로세스의 검색을 지원하지만, 같은 문서에 대한
-  동시 색인·삭제는 운영상 피한다.
+- **server 중복 변경**: 같은 실제 `RAG_DATA_DIR`를 쓰는 MCP·CLI 전체에서 변경 작업이
+  겹치면 후발 요청에 `busy`를 반환한다. 직접 `Indexer`나 이관 스크립트를 사용하는
+  관리 작업은 모든 MCP를 중지한 뒤 실행한다.
 - 설정 백업: 본 작업 시 `claude_desktop_config.json.bak` 생성됨(문제 시 복구용).
 
 ## 8. 문제 해결

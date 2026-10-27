@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import math
+import uuid
 import warnings
 from collections.abc import Mapping
 from pathlib import Path
@@ -59,7 +60,7 @@ class Indexer:
         d = self.config.parsed_doc_dir(document_id)
         d.mkdir(parents=True, exist_ok=True)
         p = self._chunks_path(document_id)
-        tmp = p.with_suffix(p.suffix + ".tmp")
+        tmp = p.with_name(f".{p.name}.{uuid.uuid4().hex}.tmp")
         try:
             with tmp.open("w", encoding="utf-8") as stream:
                 for chunk in chunks:
@@ -145,12 +146,12 @@ class Indexer:
                 bm25_k1=effective_k1,
                 bm25_b=effective_b,
             )
+            os.replace(staged_chunks, self._chunks_path(document_id))
         except Exception:
-            # 색인 실패를 manifest에 남겨 추적 가능하게(기존 데이터는 위에서 보존됨)
+            # 임베딩·DB 교체·파일 교체 실패 시 이번 작업의 임시 파일만 정리한다.
             if staged_chunks.exists():
                 staged_chunks.unlink()
             raise
-        os.replace(staged_chunks, self._chunks_path(document_id))
         committed_fields = {**manifest_fields, "status": "embedded", "num_chunks": len(chunks)}
         self.manifests.update(document_id, **committed_fields)
         return self.manifests.update(document_id, status="done", num_chunks=len(chunks))
@@ -178,7 +179,8 @@ class Indexer:
     def _stage_chunks(self, document_id: str, chunks: list[Chunk]) -> Path:
         d = self.config.parsed_doc_dir(document_id)
         d.mkdir(parents=True, exist_ok=True)
-        tmp = self._chunks_path(document_id).with_suffix(".jsonl.stage")
+        path = self._chunks_path(document_id)
+        tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.stage")
         try:
             with tmp.open("w", encoding="utf-8") as stream:
                 for chunk in chunks:

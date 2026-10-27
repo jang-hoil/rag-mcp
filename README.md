@@ -256,6 +256,13 @@ Microsoft Store판 Claude는 설정 파일이 `%APPDATA%`가 아니라
 설정 변경 후 Codex와 Claude Desktop을 완전히 종료했다 다시 실행합니다. 양쪽에서
 `list_documents`와 `collection_status` 결과가 같고 동시에 검색되는지 확인합니다.
 
+같은 `RAG_DATA_DIR`를 쓰는 MCP와 CLI는 색인·재색인·삭제·원본 경로 변경을 합쳐
+한 번에 **쓰기 작업 하나만** 실행합니다. 양쪽에서 같은 문서를 동시에 색인해도
+먼저 시작한 작업만 실행되고, 나중 요청은 `status="busy"`로 즉시 반환됩니다.
+완료 후 다시 요청하세요. 검색·조회는 계속 사용할 수 있습니다.
+업데이트 후에는 Codex·Claude의 MCP 서버를 모두 재시작해야 공용 잠금이 적용됩니다.
+양쪽의 `RAG_DATA_DIR`는 같은 실제 폴더를 가리켜야 합니다.
+
 ### 자동 실행과 롤백
 
 예약 작업 `rag-mcp-qdrant`는 `qdrant.exe`를 직접 실행하고 `IgnoreNew`로 중복 기동을

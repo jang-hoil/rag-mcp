@@ -10,6 +10,16 @@
 4. `uv run pytest -q`로 현재 통과 상태 확인.
 5. 스펙 §12.2 검증 루프(테스트 먼저 → 구현 → pytest 통과 → 커밋)대로 진행.
 
+## 2026-10-27 — MCP 인스턴스 간 동시 색인 충돌 방지
+
+- 같은 실제 `RAG_DATA_DIR`의 MCP·CLI 전체에 OS 파일 잠금(`data/.locks/mutation.lock`)을 적용. 파싱 시작부터 DB·청크·매니페스트 저장 완료까지 변경 작업 하나만 허용하고 후발 요청에 즉시 `status="busy"`를 반환. 자동 대기열 없음.
+- 비동기 작업은 요청 스레드에서 획득한 잠금을 작업 스레드의 finally에서 해제. 완료·예외·스레드 시작 실패·프로세스 강제 종료 후 재획득 검증. 검색은 계속 허용.
+- 청크 stage/tmp와 매니페스트 tmp에 UUID를 붙여 작업별 분리. 최종 청크 파일 교체 실패 시에도 이번 작업의 임시 파일만 정리.
+- 회귀 테스트 14건 추가. 최초 RED 7 failed/2 passed → 공용 잠금 적용 후 9 passed. 파일 교체 실패 정리 테스트도 RED 1 failed 확인 후 수정. 최종 전체 `uv run --offline --no-sync pytest -o addopts='' -q --basetemp <새 격리 경로>`: **267 passed, 9 skipped**, 기존 Qdrant local payload-index 경고 1건. 기존 `.venv` Python 3.12.10에서 실행.
+- 독립 검토에서 공용 잠금·스레드 인계·실패 경로·프로세스 종료 후 해제에 차단 결함 없음. 검토자의 별도 회귀/job 검증 18 passed. 같은 문서의 겹친 요청 차단 후 재시도 시 실제 VectorStore의 DB·청크·매니페스트 일치도 임시 in-memory DB에서 확인.
+- 운영 데이터·Qdrant·모델 다운로드 없음. 같은 PC의 동일 데이터 폴더가 보호 범위이며, 직접 Indexer/이관 스크립트 관리 작업은 MCP 중지 후 실행. **반영하려면 모든 MCP 인스턴스 재시작 필요.**
+- 설계/계획: `docs/superpowers/{specs,plans}/2026-10-27-cross-process-ingest*.md`.
+
 ## 2026-10-25 — 중첩 본문 색인 누락 방지
 
 - 사용자 승인 설계에 따라 `ParsedDoc.iter_blocks()`에서 중첩 `text block`만 읽기 순서대로 펼치도록 수정. 표·목록 내부는 유지하며, 자식에게 없는 페이지는 가장 가까운 상위 컨테이너에서 상속하고 원본 트리는 수정하지 않음.

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -73,9 +74,13 @@ class ManifestStore:
             manifest.created_at = _now()
         manifest.updated_at = _now()
         p = self.path(manifest.document_id)
-        tmp = p.with_suffix(".json.tmp")
-        tmp.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
-        os.replace(tmp, p)  # atomic
+        tmp = p.with_name(f".{p.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            tmp.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
+            os.replace(tmp, p)  # atomic
+        finally:
+            if tmp.exists():
+                tmp.unlink()
         return manifest
 
     def update(self, document_id: str, **fields) -> Manifest:
