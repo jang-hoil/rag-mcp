@@ -278,7 +278,23 @@ def build_chunks(
             piece = block_plain_text(block)
             if not piece:
                 continue
-            if buffer_page is None and page is not None:
+            # 한 청크의 page는 그 안의 모든 본문에 해당해야 한다. 페이지 미상인
+            # 본문도 이웃 페이지에 임의로 귀속하지 않도록 경계에서 먼저 비운다.
+            if buffer and page != buffer_page:
+                new_chunks, chunk_index = _flush_body(
+                    buffer,
+                    document_id=parsed.document_id,
+                    chunk_index=chunk_index,
+                    heading_path=current_path(),
+                    page=buffer_page,
+                    doc_name=doc_name,
+                    fiscal_year=fiscal_year,
+                    source_path=source_path,
+                    boundary_window=boundary_window,
+                )
+                chunks.extend(new_chunks)
+                buffer = ""
+            if not buffer:
                 buffer_page = page
             if buffer:
                 buffer += "\n" + piece
