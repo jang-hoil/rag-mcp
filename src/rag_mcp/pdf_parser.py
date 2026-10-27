@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Iterator, Optional
 
 from .config import Config
+from .page_render import invalidate_page_cache
 
 _MULTI_SPACE_RE = re.compile(r" {2,}")
 
@@ -157,7 +158,8 @@ def parse_pdf(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     json_path = _find_output(out_dir, "json")
-    if force or json_path is None:
+    converted = force or json_path is None
+    if converted:
         import opendataloader_pdf
 
         from .ocr_triage import document_needs_ocr
@@ -196,6 +198,10 @@ def parse_pdf(
         raise RuntimeError(f"JSON 산출물을 찾지 못함: {out_dir}")
 
     tree = json.loads(json_path.read_text(encoding="utf-8"))
+    # 파서가 새 JSON을 정상적으로 만든 뒤에만 이전 PDF의 페이지 그림을 버린다.
+    # 변환/JSON 오류나 기존 JSON 재사용 시에는 원본이 없어도 볼 수 있는 캐시를 보존한다.
+    if converted:
+        invalidate_page_cache(document_id, config)
     md_path = _find_output(out_dir, "md")
     return ParsedDoc(
         document_id=document_id,

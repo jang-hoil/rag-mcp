@@ -2,8 +2,25 @@
 from __future__ import annotations
 
 from pathlib import Path
+import time
 
 from .config import Config
+
+
+def invalidate_page_cache(document_id: str, config: Config) -> None:
+    """재변환한 문서의 페이지 PNG만 비워 다음 요청에서 다시 생성한다."""
+    for path in config.pages_dir(document_id).glob("p*.png"):
+        if path.stem[1:].isdigit() and path.is_file():
+            for attempt in range(6):
+                try:
+                    path.unlink(missing_ok=True)
+                    break
+                except PermissionError as error:
+                    # Windows 캐시 히트 읽기는 잠금을 잡지 않는다. 짧게 열린 읽기
+                    # 핸들과 삭제가 겹친 공유 위반만 최대 0.1초 재시도한다.
+                    if getattr(error, "winerror", None) != 32 or attempt == 5:
+                        raise
+                    time.sleep(0.02)
 
 
 def render_pages(

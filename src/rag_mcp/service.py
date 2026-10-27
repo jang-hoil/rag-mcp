@@ -135,7 +135,10 @@ def _page_image_bytes(path: Path, max_width: int) -> tuple[bytes, int, int]:
     import fitz
 
     try:
-        pixmap = fitz.Pixmap(str(path))
+        # 바이트를 읽고 파일을 닫은 뒤 디코딩해 변환 중에는 캐시 파일을 열어두지 않는다.
+        pixmap = fitz.Pixmap(path.read_bytes())
+    except FileNotFoundError:
+        raise
     except Exception as exc:
         raise ValueError(f"페이지 이미지 캐시를 읽을 수 없습니다: {path}") from exc
 
@@ -394,7 +397,34 @@ class RagService:
         pages: int | list[int],
         dpi: int | None = None,
     ) -> list[dict]:
-        """페이지 캐시를 우선 사용하고, 빠진 페이지만 원본 PDF에서 렌더한다."""
+        """캐시는 바로 읽고, 새 PNG 생성은 색인과 같은 OS 잠금으로 보호한다."""
+        cached = self._get_page_image(document_id, pages, dpi, render_missing=False)
+        if cached is not None:
+            return cached
+        token, busy = self._reserve_mutation("get_page_image")
+        if busy:
+            raise ValueError(
+                "페이지 이미지 생성은 문서 변경 작업이 끝난 후 다시 시도하세요. "
+                + busy["error"]
+            )
+        assert token is not None
+        try:
+            # 잠금 획득 뒤 캐시와 매니페스트를 다시 읽는다. 재파싱 중 이전 PDF 경로로
+            # PNG를 되살리지 않고, 이미지 바이트를 읽기 전 캐시가 삭제되는 것도 막는다.
+            result = self._get_page_image(document_id, pages, dpi, render_missing=True)
+            assert result is not None
+            return result
+        finally:
+            self._release_mutation(token)
+
+    def _get_page_image(
+        self,
+        document_id: str,
+        pages: int | list[int],
+        dpi: int | None,
+        *,
+        render_missing: bool,
+    ) -> list[dict] | None:
         page_numbers = _normalize_page_numbers(pages)
         effective_dpi = self.config.page_image_dpi if dpi is None else dpi
         if (
@@ -420,6 +450,8 @@ class RagService:
             for page in page_numbers
             if not cache_hits[page]
         }
+        if missing_pages and not render_missing:
+            return None
 
         # 캐시가 모두 있으면 매니페스트와 PDF 경로조차 확인하지 않는다. 원본 경로가 끊긴
         # 문서도 이미 렌더된 페이지는 계속 볼 수 있어야 한다.
@@ -478,10 +510,15 @@ class RagService:
         response = []
         for page in page_numbers:
             path = page_paths[page]
-            image, width, height = _page_image_bytes(
-                path,
-                self.config.page_image_max_width,
-            )
+            try:
+                image, width, height = _page_image_bytes(
+                    path,
+                    self.config.page_image_max_width,
+                )
+            except FileNotFoundError:
+                if not render_missing:
+                    return None
+                raise
             response.append(
                 {
                     "document_id": document_id,

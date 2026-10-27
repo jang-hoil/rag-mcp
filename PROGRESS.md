@@ -10,6 +10,17 @@
 4. `uv run pytest -q`로 현재 통과 상태 확인.
 5. 스펙 §12.2 검증 루프(테스트 먼저 → 구현 → pytest 통과 → 커밋)대로 진행.
 
+## 2026-10-27 — 본문 페이지 번호·PDF 갱신 이미지 캐시 정확성
+
+- 서로 다른 페이지의 paragraph/list/caption을 같은 본문 청크에 모으지 않도록 페이지 경계에서 flush. 페이지 미상도 이웃 쪽에 임의 귀속하지 않고, 같은 쪽 합치기·제목·문장 경계 분할·overlap은 유지. 표 병합의 기존 단일 시작 page 계약은 변경하지 않음.
+- 실제 PDF 변환과 JSON 읽기에 성공한 뒤 해당 문서의 `pages/p숫자.png`를 모두 무효화. 자동 이미지 대상 외의 캐시·줄어든 쪽수의 PNG도 제거하며 다른 문서/일반 파일은 유지. JSON 재사용·변환/JSON 오류에서는 캐시 보존.
+- 독립 검토에서 발견한 교차 실행 보완: 캐시 미스 렌더는 동일 data_dir의 기존 OS 변경 잠금을 획득한 뒤 캐시·manifest를 재조회하고 이미지 바이트 읽기까지 보호. 색인 중 미스는 재시도 안내, 캐시 히트는 계속 허용. 확인 직후 삭제된 이미지는 잠금 경로로 재시도.
+- Windows의 짧은 캐시 읽기 핸들과 삭제가 겹치는 WinError 32만 20ms 간격·총 0.1초 한도로 재시도. 일반 권한 오류·지속 점유 오류는 전파.
+- 본문 회귀 RED 10 failed → 관련 36 passed/1 skipped → 전체 298 passed/9 skipped 후 `62e6fdc` 커밋. 이미지 최초 RED 4 failed/4 passed, 교차 실행 RED 3 failed/1 passed, 실제 파일 삭제 경로 RED 1 failed, Windows 실제 공유 위반 RED 1 failed를 각각 확인 후 수정.
+- 최종 전체 pytest **313 passed, 9 skipped**, 기존 local Qdrant payload-index 경고 1건. 신규 회귀 총 25건. 임시 PDF·실제 PNG 렌더/반환·임시 Qdrant 저장/검색을 사용하고 외부 OpenDataLoader 변환만 테스트 대체. 독립 재검토에서 추가 조치할 결함 없음.
+- 운영 PDF·청크·Qdrant 자동 변경/재색인과 모델 다운로드 없음. 적용하려면 MCP 서버 재시작. 이미 저장된 본문 페이지 번호나 교체된 PDF에는 해당 문서를 `reparse=True`로 재색인해야 함.
+- 설계/계획: `docs/superpowers/{specs,plans}/2026-10-27-page-accuracy*.md`. 검토 기록: `docs/superpowers/reviews/2026-10-27-page-accuracy-review.md`.
+
 ## 2026-10-27 — 신규 PDF 문서 이름을 파일명으로 자동 저장
 
 - 신규 PDF의 표시 이름 기본값을 내부 PDF 제목 대신 파일명(stem)으로 결정. 문서 ID·파싱 폴더의 기존 파일명 기본값과 통일. 괄호·다운로드 번호·중간 마침표를 보존하고 마지막 확장자만 제거.
