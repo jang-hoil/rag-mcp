@@ -91,7 +91,10 @@ async def ingest_pdf(
 
     이어서 ingest_status(job_id)로 폴링하고, 그 응답의 message(단계·진척률)도 사용자에게
     전달한다. status는 running|done|error. 동시 색인은 1개만 허용.
-    fiscal_year/doc_name 미지정 시 파일명·표지에서 자동 추출 시도. metadata(부서·작성자 등)는
+    document_id와 doc_name 기본값은 PDF 파일명에서 .pdf를 뺀 이름이며,
+    괄호·번호·중간 마침표를 유지한다. 사용자가 별도 이름을 요청한 경우에만 이 두 인자를
+    지정하고, 보통은 생략해 파싱 폴더·벡터 DB 문서 이름을 파일명에 맞춘다.
+    fiscal_year 미지정 시 PDF 제목·본문에서 자동 추출한다. metadata(부서·작성자 등)는
     검색결과에 표시되고 meta.<키> 필터로 검색을 좁힐 수 있다."""
     return await _run(
         service().submit_ingest, path, document_id=document_id, fiscal_year=fiscal_year,

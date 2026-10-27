@@ -22,9 +22,14 @@ def parse_and_chunk(
     doc_name: str | None = None,
     force: bool = False,
 ) -> tuple[list[Chunk], dict[str, Any]]:
-    """PDF 파싱 → 메타 추출 → 청킹 → needs_image PNG → (선택) OCR text 보강."""
+    """PDF 파싱 → 파일명 기준 문서명 → 청킹 → 이미지 렌더 → 선택 OCR.
+
+    표시명 기본값은 PDF 파일명(stem)이다. 명시한 doc_name은 우선한다.
+    """
     parsed = parse_pdf(pdf_path, document_id, config, force=force)
-    meta = extract_doc_meta(parsed, doc_name=doc_name, fiscal_year=fiscal_year)
+    meta = extract_doc_meta(
+        parsed, doc_name=doc_name or Path(pdf_path).stem, fiscal_year=fiscal_year,
+    )
     meta["parsed_dir"] = str(parsed.parsed_dir)
     meta["source_path"] = str(Path(pdf_path).resolve())
 

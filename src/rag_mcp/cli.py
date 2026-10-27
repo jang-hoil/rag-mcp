@@ -26,9 +26,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p_ing = sub.add_parser("ingest", help="PDF 색인")
     p_ing.add_argument("pdf")
-    p_ing.add_argument("--document-id")
+    p_ing.add_argument("--document-id", help="문서 ID (기본: PDF 파일명에서 확장자를 뺀 이름)")
     p_ing.add_argument("--fiscal-year", type=int)
-    p_ing.add_argument("--doc-name")
+    p_ing.add_argument("--doc-name", help="표시 이름 (기본: PDF 파일명에서 확장자를 뺀 이름)")
     p_ing.add_argument("--embedding-model", default=None)
 
     p_search = sub.add_parser("search", help="검색")
