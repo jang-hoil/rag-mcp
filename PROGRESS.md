@@ -10,6 +10,37 @@
 4. `uv run pytest -q`로 현재 통과 상태 확인.
 5. 스펙 §12.2 검증 루프(테스트 먼저 → 구현 → pytest 통과 → 커밋)대로 진행.
 
+## 2026-11-06 — GitHub 동기화를 위한 코드 기준점 확인
+
+- 사용자 요청에 따라 로컬 기능 개선 5개 커밋(`e2a024d`~`6d2bf61`)과 진행/Graph RAG 계획 문서를 기존 `jang-hoil/rag-mcp`의 `master` 동기화 대상으로 정리했다. 원격 최신 상태를 fetch하여 로컬이 5커밋 앞서고 원격 전용 커밋은 없음을 확인했다.
+- 전체 검증: `uv run --offline --no-sync pytest -q -o addopts='' -o faulthandler_timeout=60 --maxfail=1 --junitxml work/github_publish_20261106/tests.xml`에서 **313 passed, 9 skipped**, 기존 local Qdrant payload-index 경고 1건, 37.65초. Python 3.12.10의 기존 .venv 사용. 모델/서버 무거운 gated 테스트는 기본 비활성 상태로 실행했다.
+- 이전 샌드박스 실행의 임시 폴더/Windows asyncio 대기는 코드 변경 없이 샌드박스 밖의 정상 임시 폴더·소켓 환경에서 재실행하여 통과했다. 아래 계획 작성 당시의 전체 통과 미확정 기록은 당시 관찰이며 이번 기준선은 통과다.
+- 최종 LlamaIndex 구현 계획도 `docs/superpowers/plans/2026-11-06-llamaindex-implementation-plan.md`에 보관했다. 기존 3개 후보 비교/초안과 함께 문서만 추가하며 Graph RAG 실제 구현·새 저장소 생성은 아직 하지 않았다.
+- 커밋 대상에서 운영 `data/`, 원본 PDF와 색인목록, 임시 `work/`, 비공개 평가·로컬 설정을 제외한다. 서버 소스·테스트·기존 색인 자료를 이번 문서 정리 때문에 변경하지 않았다.
+
+## 2026-11-06 — 별도 Graph RAG MCP 프로젝트 계획 초안
+
+- 사용자 첨부 대화와 현재 코드를 바탕으로 `docs/superpowers/plans/2026-11-06-graph-rag-mcp-roadmap.md` 작성. 기존 저장소 유지, 로컬 `6d2bf61` 출발, 별도 `graph-rag-mcp` 프로젝트 및 Qdrant `grag_` 컬렉션 분리를 제안한다.
+- SQLite 추가 없이 Qdrant에 그래프 레코드를 저장하고 Python에서 제한 탐색하는 방식. 한 문서의 관계 저장과 검색 연결을 같은 시제품으로 묶으며, 청크 순번 변경에 대비한 문서 버전·출처·중복 서식 번호의 소속 구분·재색인 복구·3종 비교 평가를 포함했다.
+- 실제 GitHub MCP로 원격 master `1c2cf4e` 확인, 로컬은 5커밋 앞선 `6d2bf61`. 실제 RAG MCP 목록은 12문서·4,393청크. 이번 작업은 계획 수립이며 새 저장소 생성·코드 구현·운영 데이터 변경·재색인은 하지 않았다.
+- 검증: 프로젝트 내부 basetemp로 인한 경로 테스트 실패를 확인하고 프로젝트 밖 허용된 임시 경로로 다시 실행하여 `tests/test_config_paths.py` 8 passed. 전체 실행 및 별도 MCP 검증은 Windows asyncio 이벤트 루프의 socketpair/accept 대기로 중단하여 전체 통과 수 미확정. 원본 소스·테스트 변경 없음. 이전 313 passed/9 skipped를 이번 결과로 주장하지 않는다.
+- 계획 작성 당시 다음 단계: 사용자 검토 이후 독립 프로젝트 준비와 Python 3.11 기준선 확보. 첨부의 “2,3”을 문서 내 관계 검색+전체 요약으로 정정하면 요약 단계를 별도 추가한다. 당시에는 초안 작성만 진행하여 코드 커밋/push는 없었다.
+- 후속 공개 코드 비교: 사용자의 요청에 따라 HKUDS/LightRAG, datastax/graph-rag, microsoft/graphrag의 공식 소스·문서를 확인하고 `docs/superpowers/plans/2026-11-06-graph-rag-open-source-review.md` 작성. LightRAG v1.5.7을 1순위 시험 후보로 추천하며 직접 엔진 구현 초안은 대안으로 보류했다.
+- LightRAG는 QdrantVectorDBStorage를 제공하지만 그래프까지 Qdrant에 저장하지는 않는다. 첫 소규모 시험은 Qdrant+NetworkX GraphML+JSON 상태/캐시로 SQLite 없이 가능하며, 공식 파일 저장소의 시험용·단일 작성자 제약과 운영 저장소 재검토를 구분했다. 현재 PDF/표·KURE·쪽수 출처·MCP 어댑터 호환성과 한국어 품질은 아직 실행 검증 전이다.
+- 비교 주의: DataStax 공식 지원 목록/adapter 파일에 Qdrant 전용 구현이 없어 추가 연결 작업 필요. Microsoft GraphRAG의 현재 README는 maintenance mode 및 신규 기능/PR 중단을 명시. 패키지 설치·모델/API 호출·운영 데이터 변경은 수행하지 않았다. 다음은 별도 프로젝트에서 외부 엔진의 1문서 PoC 설계·검증이며, 이전 7~12일 추정은 그대로 적용하지 않는다.
+- 추가 후보 비교 요청: LlamaIndex PropertyGraphIndex·SchemaLLMPathExtractor·QdrantVectorStore 소스를 확인하여 LightRAG와 동일 문서에서 비교할 핵심 후보로 추가했다. Cognee(커뮤니티 Qdrant), Fast GraphRAG(PageRank), FalkorDB SDK(별도 서버·스키마/출처), RAG-Anything(LightRAG의 표·이미지 확장)도 비교 문서에 반영했다. 다른 엔진의 품질이 낮다는 결론이나 한국어 실측 순위는 없으며 설치/실행은 하지 않았다.
+- 재사용 기준의 후속 비교: `docs/superpowers/plans/2026-11-06-lightrag-vs-llamaindex-reuse.md` 작성. 현재 Retriever/VectorStore·KURE/Kiwi·RRF/DBSF·원문/이미지·MCP를 유지하고 LlamaIndex의 그래프 기능을 부분 도입하는 안을 추천한다. upstream CustomPGRetriever, PropertyGraphIndex의 embed_kg_nodes=False, TextNode source/metadata 매핑을 확인했다. 첫 버전은 기존 청크의 일괄 재임베딩이나 QdrantVectorStore로의 검색기 교체를 요구하지 않는 설계다.
+- 비교 근거: LightRAG 기본 구성은 entities/relationships/chunks의 별도 벡터·상태를 관리하고 NoopVectorDBStorage에서는 bypass 외 조회가 비활성화된다. LlamaIndex도 기본 설정을 그대로 사용하지 않고 사용자 retriever·extractor와 문서/버전/소속별 ID 및 관계 evidence 매핑을 추가해야 한다. 소규모 그래프는 파일 저장으로 SQLite 설치 없이 검토하되 기존 잠금/원자적 교체를 연결한다. 설치·실행/성능 비교·운영 DB 변경은 하지 않았으며 기존 전체 테스트 기준선은 별도 재확인 대상이다.
+
+## 2026-10-30 — 공중보건의사제도 운영지침 색인목록
+
+- `pdf/공중보건의사제도_운영지침_색인목록.md` 작성. 원본 `pdf/2025년+공중보건의사제도+운영지침.pdf`는 총 160쪽이며 책 쪽수 + 4 = PDF 실제 쪽수.
+- 주요 목차 14개·본문 소제목 27개·운영지침 서식 20개·법령 대조 본문/별표 3개·시행규칙 서식 번호 29개(삭제 표시 2개 포함), 총 93개 항목. 전체 구성 안내 6개는 별도.
+- 원본 목차 및 각 본문 시작 쪽 대조. 텍스트 확인 82개·이미지 서식 확인 11개. 목차의 운영지침 제5호 서식 65쪽을 실제 66쪽으로 바로잡고, 시행규칙 제7·10호 서식의 목차 ‘보고’/본문 ‘통보’ 차이와 운영지침 제4항 제목 차이를 기록.
+- 후속 요청으로 MCP `review_before_ingest` → `ingest_pdf` 등록 완료. job_id `8a544e27feca4ee59e65795e7b3260a6`, 문서 ID `2025년+공중보건의사제도+운영지침`, 160쪽·2025년·KURE dense+sparse 1024차원·224청크. `ingest_status` 최종 `done`, 소요 6분 22초.
+- MCP 실제 하이브리드 검색 3건 확인: 휴가 PDF 37·40쪽, 보수 지급기준·지급기관 29·30쪽, 시·도 간 근무지 변경 19·20쪽. `list_documents`·`collection_status`로 전체 12문서·4,393청크 및 기존 11문서·4,169청크 수량 유지 확인. 이미지 내 글자 OCR 미적용, 필요 시 원본 페이지 이미지 확인.
+- 확인 기록: `work/public_health_toc_20261030/`(추출 텍스트·페이지 이미지·작성 스크립트·검증 JSON·MCP 등록/검색 결과). 색인목록과 `data/문서목록.md` 갱신. 원본 PDF·서버 소스 변경 없음. 문서 등록 작업으로 pytest/코드 커밋은 하지 않음.
+
 ## 2026-10-27 — 본문 페이지 번호·PDF 갱신 이미지 캐시 정확성
 
 - 서로 다른 페이지의 paragraph/list/caption을 같은 본문 청크에 모으지 않도록 페이지 경계에서 flush. 페이지 미상도 이웃 쪽에 임의 귀속하지 않고, 같은 쪽 합치기·제목·문장 경계 분할·overlap은 유지. 표 병합의 기존 단일 시작 page 계약은 변경하지 않음.
@@ -61,6 +92,28 @@
 - 실제 Orca orchestration Run `run_573939275c6c`에서 진단·검증·구현 작업을 배정했으나 Codex 준비 단계 timeout, Claude 세션 사용량 제한으로 수행 불가. 해당 작업자를 종료·정리하고 사용자가 승인한 범위를 조정자가 직접 구현·검증함. 독립 작업자 코드 검토는 수행하지 못함.
 - 14:29 후속 독립 검토 완료: 한도 회복 후 같은 Run의 Task `task_18d6b0c6b869`, Dispatch `ctx_e0c18ba4a5a9`에서 Claude 작업자가 커밋 `248f871`과 청커·메타데이터·파이프라인을 읽고 경계 사례 4건을 재현함. 결론은 Ready, 차단 결함 없음. 비차단 권고(연도 추출 40블록 창의 의미, content와 무효 kids 조합, 잘못된 kids 타입, 중첩 경계를 넘는 표 병합 테스트)는 `docs/superpowers/reviews/2026-10-25-nested-text-block-review.md`에 기록. 소스 변경이나 전체 테스트 재실행 없이 보고 수락·작업자 정리 완료.
 - 설계/계획: `docs/superpowers/{specs,plans}/2026-10-25-nested-text-block*.md`. 검증 스크립트·결과: `work/orchestration_20261025/`. 실행 중인 MCP 서버에는 재시작 후 코드 반영.
+
+## 2026-10-16 — 민방위 업무편람 목차 색인목록
+
+- `pdf/민방위업무편람_색인목록.md` 작성: 「2026년도 민방위 업무편람」 PDF 441쪽, 5개 분야·세부 목차 171개 항목(참고자료·붙임·서식 포함).
+- 원본 PDF 전체 목차 5쪽과 세부 목차 9~10·75~76·193·213~216·389쪽을 렌더링하여 대조. 책 쪽수 + 6 = PDF 실제 쪽수이며, 각 항목의 지정 본문 쪽과 제목을 대조했다.
+- 후속 검색용 색인 요청까지 완료: MCP job `89963fa86e6f4f6d9551e66e05687baf`로 최초 946청크 색인 후, 중첩 `text block` 336개 묶음을 풀어 기존 청커·Indexer로 **1,016청크**로 보정. 문서 ID `2026년도 민방위 업무편람`, 연도 2026, KURE dense+sparse 1024차원. 표 280청크·이미지 확인 대상 87청크.
+- 동일 본문 880청크는 기존 KURE 벡터를 재사용하고 추가·변경 본문 128종만 새로 임베딩. sparse는 전체 보정 문서 기준으로 다시 생성. 최종 MCP 상태 11문서·4,169청크이며 기존 10문서·3,153청크 수량 유지.
+- MCP 실제 검색 5건 확인: 편성 제외 심의(PDF 17~18), 교육 면제·유예(126~127·129), 훈련 계획(196~197), 비상급수 수질검사(291·295), 동원 유예(400). 원본 페이지 이미지 PDF 197쪽 확인.
+- 보정 전 JSON·청크·매니페스트 백업: `data/parsed/2026년도 민방위 업무편람/backup-before-text-block-normalization-20261016/`. `normalize_index.py --apply`는 완료 데이터에 재실행하지 말 것. `reindex(reparse=False)`는 보정 청크 재사용, 재파싱 시에는 누락 재발 주의.
+- 재현 및 확인 기록: `work/civil_defense_toc_20261016/` (추출 스크립트·항목 JSON·목차 이미지).
+- 서버 소스 변경 없이 문서만 작성하여 pytest/코드 커밋은 수행하지 않음.
+
+## 2026-10-15 — IBMS PDF 2건 색인 및 목차 목록
+
+- `pdf/IBMS_색인목록.md`: 업무담당자용 52쪽·22항목, 감사자용 65쪽·28항목. 원본 목차 이미지 및 본문 쪽수 대조.
+- 최종 RAG: 업무담당자용 116청크, 감사자용 120청크. MCP list_documents/collection_status 확인: 전체 10문서·3,153청크, 기존 8문서 수량 유지.
+- MCP 검색 검증: 업무담당자용 자기진단 수행 및 감사자용 시나리오 기준정보가 각각 42~43쪽 본문 반환.
+- 발견 사항: `ParsedDoc.iter_blocks()`는 루트 kids만 반환하므로 OpenDataLoader의 중첩 `text block` 본문을 건너뜀. 최초 색인은 39/5청크였음.
+- 이번 작업은 서버 소스 변경 없이 두 문서의 중첩 묶음을 풀어 기존 청커/Indexer로 재색인함. 처리 스크립트: `work/index_ibms_20261015.py`. 표·리스트 내부 구조 보존. Qdrant HTTP 모드 사용.
+- 백업: 각 `data/parsed/IBMS.../backup-before-text-block-normalization-20261015/`에 원본 JSON·최초 청크·매니페스트 저장.
+- 주의/다음 개선: `reparse=True`나 같은 PDF의 ingest는 원본 JSON을 다시 생성해 누락이 재발할 수 있음. 일반 `reindex(reparse=False)`는 보정된 청크를 재사용함. 영구 해결은 별도 개발 작업으로 text block 순회 지원 및 회귀 테스트 필요. 스크립트는 최초 보정용이며 완료 데이터에 그대로 재실행하지 말 것.
+- 목록 작성과 색인 요청은 완료. 소스 수정이 없어 pytest/코드 커밋은 수행하지 않음.
 
 ## ✅ 완료 (2026-08-22) — MCP Python SDK v2 전환
 - 의존성을 `mcp>=2,<3`으로 올려 MCP Python SDK **2.0.0**을 사용한다.
