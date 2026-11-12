@@ -10,6 +10,9 @@
 """
 from __future__ import annotations
 
+import os
+import threading
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 
@@ -29,6 +32,65 @@ mcp = MCPServer("rag-mcp", log_level="WARNING")
 _service: RagService | None = None
 
 
+def rotate_log_if_needed(path: Path, max_bytes: int, backups: int) -> bool:
+    """기동 시 로그가 max_bytes 이상이면 server.log → .1 → .2 … 로 밀어낸다(가장 오래된 것 삭제).
+
+    회전을 기동 시에만 하는 이유: MCP 서버는 클라이언트 재시작마다 새로 뜨고 평상시
+    WARNING 레벨이라 실행 중 증가는 미미하다. 또 여러 인스턴스(Codex·Claude)가 같은 파일에
+    이어 쓰므로 실행 중 회전은 Windows에서 실패한다. 이름 변경이 막히면(다른 인스턴스가
+    열고 있음) 이번 회전만 건너뛰고 False — 서버 기동을 막지 않는다.
+    """
+    if max_bytes <= 0:
+        return False
+    try:
+        if path.stat().st_size < max_bytes:
+            return False
+    except FileNotFoundError:
+        return False
+    try:
+        path.with_name(f"{path.name}.{backups}").unlink(missing_ok=True)
+        for index in range(backups - 1, 0, -1):
+            older = path.with_name(f"{path.name}.{index}")
+            if older.exists():
+                os.replace(older, path.with_name(f"{path.name}.{index + 1}"))
+        os.replace(path, path.with_name(f"{path.name}.1"))
+    except OSError:
+        return False
+    return True
+
+
+class TimestampedLogStream:
+    """줄 머리마다 `[YYYY-MM-DD HH:MM:SS] `를 붙여 원본 스트림에 쓴다.
+
+    print는 본문과 줄바꿈을 따로 write하므로 줄 시작 여부를 상태로 기억한다.
+    write/flush 외 속성(close·fileno·encoding 등)은 원본 스트림에 위임한다.
+    """
+
+    def __init__(self, stream) -> None:
+        self._stream = stream
+        self._at_line_start = True
+        self._lock = threading.Lock()
+
+    def write(self, text: str) -> int:
+        if not text:
+            return 0
+        with self._lock:
+            parts: list[str] = []
+            for piece in text.splitlines(keepends=True):
+                if self._at_line_start:
+                    parts.append(datetime.now().strftime("[%Y-%m-%d %H:%M:%S] "))
+                parts.append(piece)
+                self._at_line_start = piece.endswith(("\n", "\r"))
+            self._stream.write("".join(parts))
+        return len(text)
+
+    def flush(self) -> None:
+        self._stream.flush()
+
+    def __getattr__(self, name: str):
+        return getattr(self._stream, name)
+
+
 def redirect_logs_to_file(config) -> Path | None:
     """서버 로그를 stderr 대신 파일로 보낸다(파이프 블로킹 원천 차단).
 
@@ -36,6 +98,7 @@ def redirect_logs_to_file(config) -> Path | None:
     4KB는 금방 찬다. mcp.run() 직전에 호출해 stderr 파이프를 아예 쓰지 않게 만든다.
     기동 검사(preflight) 실패는 이 전환 **이전**에 나므로 클라이언트가 그대로 볼 수 있다.
 
+    기동 시 크기 기반 회전(RAG_LOG_MAX_BYTES·RAG_LOG_BACKUPS)과 줄마다 시각 표시를 한다.
     실패해도 서버는 계속 뜬다(로그 위치보다 서비스 가동이 우선) — 이때 None을 반환하고
     stderr를 건드리지 않는다.
     """
@@ -45,10 +108,12 @@ def redirect_logs_to_file(config) -> Path | None:
         log_dir = config.data_dir / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         path = log_dir / "server.log"
+        rotate_log_if_needed(path, config.log_max_bytes, config.log_backups)
         stream = path.open("a", encoding="utf-8", buffering=1)
     except OSError:
         return None
-    sys.stderr = stream
+    sys.stderr = TimestampedLogStream(stream)
+    print(f"[rag-mcp] 서버 기동 pid={os.getpid()}", file=sys.stderr, flush=True)
     return path
 
 

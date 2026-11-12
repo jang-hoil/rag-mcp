@@ -145,6 +145,12 @@ class Config:
     chunk_boundary_window: int = field(
         default_factory=lambda: int(_env("RAG_CHUNK_BOUNDARY_WINDOW", "160"))
     )
+    # 서버 로그(data/logs/server.log) 크기 제한. 기동 시 이 크기 이상이면 server.log.1로 회전.
+    # 0이면 회전하지 않는다. 보관 개수는 server.log.1 ~ server.log.N.
+    log_max_bytes: int = field(
+        default_factory=lambda: int(_env("RAG_LOG_MAX_BYTES", "5000000"))
+    )
+    log_backups: int = field(default_factory=lambda: int(_env("RAG_LOG_BACKUPS", "3")))
 
     def __post_init__(self) -> None:
         if self.qdrant_mode not in {"local", "server"}:
@@ -182,6 +188,10 @@ class Config:
             raise ValueError("리랭커 가중치는 0 이상이어야 합니다")
         if not 0 <= self.chunk_boundary_window <= 800:
             raise ValueError("chunk_boundary_window는 0 이상 800 이하여야 합니다")
+        if self.log_max_bytes < 0:
+            raise ValueError("log_max_bytes는 0 이상이어야 합니다(0=회전 안 함)")
+        if not 1 <= self.log_backups <= 20:
+            raise ValueError("log_backups는 1 이상 20 이하여야 합니다")
 
     # 파생 경로
     @property

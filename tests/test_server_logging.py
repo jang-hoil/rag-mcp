@@ -10,8 +10,10 @@ stderr를 읽어가지 않으면 Windows 파이프 버퍼(4,096바이트)가 차
 방어는 두 겹이다: ① 요청마다 나가던 INFO를 끈다(log_level=WARNING)
 ② 기동 검사 후에는 stderr를 로그 파일로 돌려 파이프를 아예 쓰지 않는다.
 """
+import contextlib
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -57,6 +59,142 @@ def test_redirect_logs_to_file_falls_back_when_unwritable(tmp_path, monkeypatch)
 
     assert path is None
     assert sys.stderr is original, "실패 시 stderr를 건드리면 안 된다"
+
+
+# --- 로그 크기 제한(기동 시 회전)과 시각 표시 (리포트 #8) ---
+
+_STAMP = re.compile(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] ")
+
+
+@contextlib.contextmanager
+def _redirected(config):
+    original = sys.stderr
+    try:
+        yield server_mod.redirect_logs_to_file(config)
+    finally:
+        if sys.stderr is not original:
+            sys.stderr.close()
+        sys.stderr = original
+
+
+def _log_lines(path: Path) -> list[str]:
+    return path.read_text(encoding="utf-8").splitlines()
+
+
+def test_log_lines_are_timestamped_once_per_line(tmp_path, monkeypatch):
+    """print는 본문과 줄바꿈을 따로 쓴다 — 줄마다 시각이 정확히 한 번만 붙어야 한다."""
+    monkeypatch.setenv("RAG_DATA_DIR", str(tmp_path))
+    with _redirected(Config()) as path:
+        print("첫 줄", file=sys.stderr)
+        sys.stderr.write("둘째 줄\n셋째 ")
+        sys.stderr.write("줄 이어쓰기\n")
+        sys.stderr.flush()
+    lines = _log_lines(path)
+    body = [line for line in lines if "줄" in line]
+    assert len(body) == 3
+    for line in lines:
+        assert _STAMP.match(line), f"시각 누락: {line!r}"
+        assert len(_STAMP.findall(line)) == 1
+    assert body[2].endswith("셋째 줄 이어쓰기")
+
+
+def test_startup_marker_is_logged(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAG_DATA_DIR", str(tmp_path))
+    with _redirected(Config()) as path:
+        sys.stderr.flush()
+    assert any(f"pid={os.getpid()}" in line for line in _log_lines(path))
+
+
+def test_oversized_log_is_rotated_at_startup(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAG_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RAG_LOG_MAX_BYTES", "100")
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "server.log").write_text("옛 로그\n" * 50, encoding="utf-8")
+
+    with _redirected(Config()) as path:
+        print("새 기동", file=sys.stderr)
+        sys.stderr.flush()
+
+    rotated = log_dir / "server.log.1"
+    assert rotated.exists()
+    assert rotated.read_text(encoding="utf-8") == "옛 로그\n" * 50
+    current = path.read_text(encoding="utf-8")
+    assert "옛 로그" not in current and "새 기동" in current
+
+
+def test_rotation_shifts_backups_and_drops_oldest(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAG_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RAG_LOG_MAX_BYTES", "10")
+    monkeypatch.setenv("RAG_LOG_BACKUPS", "2")
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "server.log").write_text("현재" * 20, encoding="utf-8")
+    (log_dir / "server.log.1").write_text("백업1", encoding="utf-8")
+    (log_dir / "server.log.2").write_text("백업2", encoding="utf-8")
+
+    with _redirected(Config()):
+        pass
+
+    assert (log_dir / "server.log.1").read_text(encoding="utf-8") == "현재" * 20
+    assert (log_dir / "server.log.2").read_text(encoding="utf-8") == "백업1"
+    assert not (log_dir / "server.log.3").exists()
+
+
+def test_small_log_is_appended_not_rotated(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAG_DATA_DIR", str(tmp_path))
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "server.log").write_text("이전 기록\n", encoding="utf-8")
+
+    with _redirected(Config()) as path:
+        print("이어서", file=sys.stderr)
+        sys.stderr.flush()
+
+    assert not (log_dir / "server.log.1").exists()
+    text = path.read_text(encoding="utf-8")
+    assert text.startswith("이전 기록\n") and "이어서" in text
+
+
+def test_rotation_failure_still_redirects(tmp_path, monkeypatch):
+    """다른 인스턴스가 로그를 열고 있으면(Windows) 이름 변경이 실패한다 — 회전만 건너뛴다."""
+    monkeypatch.setenv("RAG_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RAG_LOG_MAX_BYTES", "10")
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "server.log").write_text("x" * 100, encoding="utf-8")
+
+    def locked(*_args, **_kwargs):
+        raise PermissionError("다른 프로세스가 사용 중")
+
+    monkeypatch.setattr(server_mod.os, "replace", locked)
+    with _redirected(Config()) as path:
+        assert path is not None
+        print("회전 실패 후에도 기록", file=sys.stderr)
+        sys.stderr.flush()
+
+    assert "회전 실패 후에도 기록" in path.read_text(encoding="utf-8")
+
+
+def test_log_limit_zero_disables_rotation(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAG_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RAG_LOG_MAX_BYTES", "0")
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "server.log").write_text("x" * 10_000, encoding="utf-8")
+    with _redirected(Config()):
+        pass
+    assert not (log_dir / "server.log.1").exists()
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [("RAG_LOG_MAX_BYTES", "-1"), ("RAG_LOG_BACKUPS", "0"), ("RAG_LOG_BACKUPS", "21")],
+)
+def test_log_settings_are_validated(monkeypatch, key, value):
+    monkeypatch.setenv(key, value)
+    with pytest.raises(ValueError):
+        Config()
 
 
 # --- 실제 서버 프로세스로 재현·회귀 (무거워서 기본 제외) ---
