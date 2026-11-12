@@ -25,6 +25,13 @@ data/backups/
 eval/goldset.jsonl
 tests/fixtures/sample_parsed.json
 
+# 작업 잔재·서버 로그·백업·목차 목록 (실제 문서 본문·문서명 포함 — 공개 금지)
+# data/는 전부 실행 산출물이라 통째로 막는다(백업 폴더 data/*.bak-*, data/logs/, data/문서목록.md 포함).
+data/
+work/
+tmp/
+pdf/*색인목록.md
+
 # Claude Code 머신 로컬 설정 (개인별 — 커밋 금지)
 .claude/settings.local.json
 
