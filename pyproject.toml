@@ -1,7 +1,7 @@
 [project]
 name = "rag-mcp"
 version = "0.1.0"
-description = "회계·예산 지침서 RAG MCP 서버 (로컬 색인, Qdrant dense+sparse 하이브리드)"
+description = "업무 지침서·편람(회계·예산·민방위·징계·감사 등) RAG MCP 서버 (로컬 색인, Qdrant dense+sparse 하이브리드)"
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "mcp>=2,<3",

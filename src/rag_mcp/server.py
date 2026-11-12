@@ -70,7 +70,8 @@ async def search_documents(
     search_mode: str = "hybrid", embedding_model: str | None = None,
     fusion: str = "rrf", fiscal_year: int | None = None, filters: dict[str, JsonValue] | None = None,
 ) -> list[dict]:
-    """특정 회계·예산 지침서의 하이브리드 검색. document_id는 필수.
+    """색인된 업무 지침서·편람 1건의 하이브리드 검색. document_id는 필수(list_documents로 확인).
+    문서 분야는 회계·예산뿐 아니라 민방위·징계·감사·공중보건의 등 다양하다.
     fiscal_year로 해당 연도만 검색. 결과가 needs_image면 page_image 경로 포함."""
     return await _run(
         service().search_documents, query, document_id=document_id, top_k=top_k, search_mode=search_mode,
@@ -127,7 +128,8 @@ async def get_page_image(
     """문서의 원본 페이지를 실제 이미지 콘텐츠로 반환한다.
 
     pages는 단일 페이지 번호 또는 최대 5쪽의 목록이다. 캐시 PNG를 먼저 사용하고,
-    빠진 페이지만 manifest의 원본 PDF에서 렌더한다. dpi 미지정 시 화면 확인용 144dpi를 쓴다.
+    빠진 페이지만 manifest의 원본 PDF에서 렌더한다. dpi 미지정 시 설정값
+    RAG_PAGE_IMAGE_DPI(기본 200dpi)를 쓴다.
     """
     page_images = await _run(
         service().get_page_image,

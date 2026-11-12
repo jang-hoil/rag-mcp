@@ -99,7 +99,7 @@ def test_get_page_image_renders_only_missing_pages_with_requested_dpi(
 def test_get_page_image_uses_readable_low_dpi_default(
     tmp_path, fake_backend, monkeypatch
 ):
-    """dpi 미지정 시 색인용 200dpi보다 낮은 화면 확인용 144dpi를 사용한다."""
+    """dpi 미지정 시 설정값 page_image_dpi(이 테스트에서는 144)를 사용한다."""
     from rag_mcp import service as service_module
 
     svc = _service(tmp_path, fake_backend)

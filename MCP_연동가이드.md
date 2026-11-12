@@ -1,6 +1,6 @@
 # RAG MCP — Claude Desktop 연동 가이드
 
-회계·예산 지침서 RAG 서버를 **Claude Desktop**(및 동일 방식의 MCP 클라이언트)에
+업무 지침서·편람(회계·예산, 민방위, 징계, 감사, 공중보건의 등) RAG 서버를 **Claude Desktop**(및 동일 방식의 MCP 클라이언트)에
 stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰이크로 검증됨
 (`initialize` → `tools/list` 11개 → `collection_status` 정상 반환 확인).
 
