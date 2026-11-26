@@ -22,7 +22,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 # 단계 이름은 클라이언트가 사용자에게 그대로 보여주는 값이라 한국어로 고정한다.
 STAGE_WAITING = "대기"
@@ -56,6 +56,8 @@ class Job:
     stage: str = STAGE_WAITING
     processed: int = 0
     total: int = 0
+    # 마지막으로 진척을 관측(보고)한 시각. 중단 판정 시 경과 시간의 끝으로 쓴다.
+    updated_at: Optional[float] = None
 
     def elapsed_seconds(self) -> float:
         end = self.finished_at if self.finished_at is not None else time.time()
@@ -104,10 +106,21 @@ class Job:
 class JobStore:
     """스레드 안전 job 레지스트리."""
 
-    def __init__(self, persist_path: Path | None = None) -> None:
+    # 진행 중 진척을 디스크에 남기는 최소 간격(초). 단계 전환은 간격과 무관하게 바로 기록한다.
+    PROGRESS_PERSIST_INTERVAL = 5.0
+
+    def __init__(
+        self,
+        persist_path: Path | None = None,
+        owner_alive: Callable[[], bool] | None = None,
+    ) -> None:
+        """owner_alive: 디스크에만 있는 running job의 소유 인스턴스가 살아 있는지 판단한다
+        (예: 다른 프로세스가 데이터 쓰기 잠금을 쥐고 있는가). 없으면 항상 '죽음'으로 본다."""
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
         self._persist_path = persist_path
+        self._owner_alive = owner_alive
+        self._last_persist = 0.0
 
     def _persist(self, job: Job) -> None:
         """마지막 job 1건을 원자적으로 기록한다(락 안에서 호출). 실패해도 색인은 계속."""
@@ -118,6 +131,7 @@ class JobStore:
             tmp = self._persist_path.with_suffix(".tmp")
             tmp.write_text(json.dumps(asdict(job), ensure_ascii=False, default=str), encoding="utf-8")
             os.replace(tmp, self._persist_path)
+            self._last_persist = time.monotonic()
         except OSError:
             pass
 
@@ -127,17 +141,23 @@ class JobStore:
             return None
         try:
             data = json.loads(self._persist_path.read_text(encoding="utf-8"))
-            if data.get("job_id") != job_id:
+            if not isinstance(data, dict) or data.get("job_id") != job_id:
                 return None
             job = Job(**{f.name: data[f.name] for f in fields(Job) if f.name in data})
         except (OSError, ValueError, TypeError):
             return None
         if job.status == "running":
+            # 다른 MCP/CLI 인스턴스가 지금 색인 중이면(쓰기 잠금 보유) 그 기록이 최신 진척이다.
+            if self._owner_alive is not None and self._owner_alive():
+                return job
+            last = job.stage
+            if job.total > 0:
+                last += f" {job.processed:,}/{job.total:,}"
             job.status = "error"
-            job.error = ("서버가 재시작되어 색인이 중단되었습니다. "
+            job.error = (f"서버가 재시작되어 색인이 중단되었습니다(마지막 관측: {last}). "
                          "list_documents로 상태를 확인하고 필요하면 다시 색인하세요")
             job.stage = STAGE_FAILED
-            job.finished_at = job.started_at
+            job.finished_at = job.updated_at or job.started_at
         return job
 
     def create(self, document_id: str | None = None) -> Job:
@@ -159,9 +179,17 @@ class JobStore:
         with self._lock:
             j = self._jobs.get(job_id)
             if j is not None and j.status == "running":
+                stage_changed = j.stage != stage
                 j.stage = stage
                 j.processed = processed
                 j.total = total
+                j.updated_at = time.time()
+                # 재시작 후 '어디까지 했는지' 복원용: 단계 전환은 즉시, 그 외엔 일정 간격으로 기록.
+                if (
+                    stage_changed
+                    or time.monotonic() - self._last_persist >= self.PROGRESS_PERSIST_INTERVAL
+                ):
+                    self._persist(j)
 
     def finish(self, job_id: str, result: dict) -> None:
         with self._lock:

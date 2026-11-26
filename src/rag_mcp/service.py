@@ -107,9 +107,12 @@ class RagService:
         self._qdrant_client = None
         self.manifests = ManifestStore(self.config)
         # 비동기 job 추적과 같은 데이터 폴더의 MCP/CLI 전체 쓰기 1개 제한.
-        self.jobs = JobStore(self.config.data_dir / "jobs" / "last_ingest_job.json")
         self._submit_lock = threading.Lock()
         self._mutations = MutationGuard(self.config.data_dir)
+        self.jobs = JobStore(
+            self.config.data_dir / "jobs" / "last_ingest_job.json",
+            owner_alive=self._mutations.held_by_other_process,
+        )
         # retriever/indexer 캐시 빌드 보호. 백그라운드 ingest 스레드와 메인 검색 스레드가
         # 같은 모델의 VectorStore(Qdrant local client)를 동시에 두 개 열어 파일락이 충돌하는 것을 막는다.
         # _indexer가 락을 쥔 채 _retriever를 재호출하므로 재진입 가능한 RLock을 쓴다.
