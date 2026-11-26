@@ -17,12 +17,13 @@
 - 한국어 토큰화는 **Kiwi** (공백 분리 금지). 코드·금액은 토큰 보존.
 - dense+sparse 점수 **직접 가산 금지** → RRF/DBSF 융합만.
 - 저장·검색 임베딩 모델 동일해야 함 → `embedding_model`이 컬렉션 결정.
-- Qdrant **local path 모드 + serve 중 CLI ingest 동시 실행 금지** (파일락).
+- Qdrant **local path 모드에서는 serve 중 CLI ingest 동시 실행 금지** (파일락). 운영은 server 모드(localhost HTTP)라 해당 없음.
 
 ## 환경
 - Python: **uv + 3.11** (.venv). 3.13은 torch 설치 리스크로 회피.
 - Java 21 (OpenDataLoader JVM). pdftoppm 없음 → **pymupdf 폴백** 사용.
-- 명령: `uv run pytest -q`, `uv run rag-mcp ...`
+- 명령: `uv run --extra dev pytest -q`, `uv run --extra dev ruff check .`, `uv run rag-mcp ...`
 
 ## 진행 상태
-**매 세션 시작 시 `PROGRESS.md`를 먼저 읽을 것.** 현재 마일스톤·다음 할 일·재개 방법이 거기 있다.
+**매 세션 시작 시 `PROGRESS.md`를 먼저 읽을 것.** 현재 상태·다음 할 일·재개 방법이 거기 있다(마일스톤 0~7은 완료).
+끝난 작업 기록은 `docs/history/PROGRESS-history.md`로 옮겨 PROGRESS.md를 짧게 유지한다.
