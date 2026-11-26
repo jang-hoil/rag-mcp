@@ -86,6 +86,15 @@ class Config:
     qdrant_path: Path = field(default_factory=_default_qdrant_path)
     qdrant_url: str = field(default_factory=lambda: _env("RAG_QDRANT_URL", ""))
     embedding_model: str = field(default_factory=lambda: _env("RAG_EMBEDDING_MODEL", "kure"))
+    # 임베딩 연산 장치(SentenceTransformer device). GPU가 있으면 "cuda" 등으로 바꾼다.
+    embedding_device: str = field(default_factory=lambda: _env("RAG_EMBEDDING_DEVICE", "cpu"))
+    # 하이브리드 검색에서 융합 전에 가져올 후보 수(의미 dense / 키워드 sparse). top_k가 더 크면 top_k.
+    hybrid_dense_candidates: int = field(
+        default_factory=lambda: int(_env("RAG_HYBRID_DENSE_CANDIDATES", "20"))
+    )
+    hybrid_sparse_candidates: int = field(
+        default_factory=lambda: int(_env("RAG_HYBRID_SPARSE_CANDIDATES", "30"))
+    )
     render_dpi: int = field(default_factory=lambda: int(_env("RAG_RENDER_DPI", "200")))
     # 화면 확인 DPI는 색인 렌더(render_dpi)와 같은 200으로 둔다. 실측상 A4 한 쪽이
     # 2000x1501 PNG 0.2~0.6MB라 낮출 이유가 없고, 캐시 PNG를 재인코딩 없이 그대로 쓸 수 있다.
@@ -160,6 +169,12 @@ class Config:
                 f"알 수 없는 임베딩 모델: {self.embedding_model} "
                 f"(가능: {list(COLLECTION_BY_MODEL)})"
             )
+        if not self.embedding_device.strip():
+            raise ValueError("embedding_device는 비어 있을 수 없습니다")
+        if not 1 <= self.hybrid_dense_candidates <= 1000:
+            raise ValueError("hybrid_dense_candidates는 1 이상 1000 이하여야 합니다")
+        if not 1 <= self.hybrid_sparse_candidates <= 1000:
+            raise ValueError("hybrid_sparse_candidates는 1 이상 1000 이하여야 합니다")
         if not 72 <= self.page_image_dpi <= 300:
             raise ValueError("page_image_dpi는 72 이상 300 이하여야 합니다")
         if not 320 <= self.page_image_max_width <= 4096:

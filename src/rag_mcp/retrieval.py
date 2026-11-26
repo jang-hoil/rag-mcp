@@ -51,6 +51,20 @@ def _source_from_payload(payload: dict) -> SearchSource:
     )
 
 
+def _matched_by(text: str, search_mode: str, q_sparse_idx: set[int]) -> list[str]:
+    matched_by: list[str] = []
+    if search_mode in ("dense", "hybrid"):
+        # dense는 근사 표기: dense 신호가 동작한 검색이면 항상 포함(개별 청크 기여도는 미산정).
+        # sparse는 아래에서 질의·문서 토큰 겹침을 실제로 확인한다.
+        matched_by.append("dense")
+    if search_mode in ("sparse", "hybrid"):
+        # 질의 sparse 토큰이 청크 텍스트와 겹치면 sparse 기여로 표기
+        doc_idx, _ = to_sparse_query(text)
+        if q_sparse_idx & set(doc_idx):
+            matched_by.append("sparse")
+    return matched_by
+
+
 class Retriever:
     def __init__(
         self,
@@ -74,7 +88,7 @@ class Retriever:
     @property
     def backend(self) -> EmbeddingBackend:
         if self._backend is None:
-            self._backend = get_backend(self.embedding_model)
+            self._backend = get_backend(self.embedding_model, self.config.embedding_device)
         return self._backend
 
     def _current_reranker_key(self) -> tuple:
@@ -156,6 +170,8 @@ class Retriever:
         points = self.store.query(
             dense_vec, sparse_vec, top_k=candidate_k, search_mode=search_mode,
             fusion=fusion, fiscal_year=fiscal_year, filters=filters,
+            dense_candidates=self.config.hybrid_dense_candidates,
+            sparse_candidates=self.config.hybrid_sparse_candidates,
         )
         candidates_before_filter = len(points)
         min_dense_score = self.config.min_dense_score
@@ -210,11 +226,12 @@ class Retriever:
                 continue
             kept.append(point)
 
-        converted = [
-            self._to_result(point, search_mode, q_sparse_idx)
-            for point in kept
-        ]
+        converted = [self._to_result(point) for point in kept]
         reranked = self.reranker.rerank(query, converted)[:top_k]
+        # matched_by의 sparse 판정은 청크 텍스트를 다시 형태소 분석한다 → 리랭크 후보 전체가 아니라
+        # 최종 top_k에만 계산한다(리랭커가 matched_by를 쓰지 않으므로 결과 동일).
+        for result in reranked:
+            result.matched_by = _matched_by(result.text, search_mode, q_sparse_idx)
         return SearchOutcome(
             results=reranked,
             candidates_before_filter=candidates_before_filter,
@@ -223,25 +240,13 @@ class Retriever:
             notices=notices,
         )
 
-    def _to_result(self, p: ScoredPoint, search_mode: str, q_sparse_idx: set[int]) -> SearchResult:
+    def _to_result(self, p: ScoredPoint) -> SearchResult:
         payload = p.payload or {}
-        matched_by: list[str] = []
-        if search_mode in ("dense", "hybrid"):
-            # dense는 근사 표기: dense 신호가 동작한 검색이면 항상 포함(개별 청크 기여도는 미산정).
-            # sparse는 아래에서 질의·문서 토큰 겹침을 실제로 확인한다.
-            matched_by.append("dense")
-        if search_mode in ("sparse", "hybrid"):
-            # 질의 sparse 토큰이 청크 텍스트와 겹치면 sparse 기여로 표기
-            doc_idx, _ = to_sparse_query(payload.get("text", ""))
-            if q_sparse_idx & set(doc_idx):
-                matched_by.append("sparse")
-
         return SearchResult(
             chunk_id=payload.get("chunk_id", str(p.id)),
             text=payload.get("text", ""),
             score=float(p.score),
             fusion_score=float(p.score),
-            matched_by=matched_by,
             source=_source_from_payload(payload),
         )
 

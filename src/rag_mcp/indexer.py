@@ -50,7 +50,7 @@ class Indexer:
     @property
     def backend(self) -> EmbeddingBackend:
         if self._backend is None:
-            self._backend = get_backend(self.embedding_model)
+            self._backend = get_backend(self.embedding_model, self.config.embedding_device)
         return self._backend
 
     def _chunks_path(self, document_id: str) -> Path:

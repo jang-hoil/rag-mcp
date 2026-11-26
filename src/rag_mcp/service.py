@@ -188,7 +188,7 @@ class RagService:
             return self._backend
         with self._resource_lock:
             if model not in self._backends:
-                self._backends[model] = get_backend(model)
+                self._backends[model] = get_backend(model, self.config.embedding_device)
             return self._backends[model]
 
     def _client(self):

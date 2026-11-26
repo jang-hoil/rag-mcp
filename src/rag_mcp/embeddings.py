@@ -49,8 +49,9 @@ class EmbeddingBackend(ABC):
 class _SentenceTransformerBackend(EmbeddingBackend):
     """SentenceTransformer 기반 dense 백엔드 (KURE/BGE-M3 공통)."""
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, device: str = "cpu"):
         self.name = name
+        self.device = device
         self.dimension = DIMENSION_BY_MODEL[name]
         self._hf_id = HF_ID_BY_MODEL[name]
         self._model = None  # lazy
@@ -80,15 +81,15 @@ class _SentenceTransformerBackend(EmbeddingBackend):
 
         from sentence_transformers import SentenceTransformer
 
-        # GPU 없는 환경 확정 → device="cpu" 명시(불필요한 CUDA 초기화 시도 제거).
+        # 장치는 config.embedding_device(RAG_EMBEDDING_DEVICE, 기본 cpu) — 기본값은 불필요한 CUDA 초기화를 피한다.
         print(
             f"[rag-mcp] 임베딩 모델 로딩 시작: {self.name} ({self._hf_id}) "
-            f"device=cpu HF오프라인={offline}",
+            f"device={self.device} HF오프라인={offline}",
             file=sys.stderr,
             flush=True,
         )
         t0 = time.monotonic()
-        model = SentenceTransformer(self._hf_id, device="cpu")
+        model = SentenceTransformer(self._hf_id, device=self.device)
         # 차원 검증 (저장·검색 정합 보장) — 검증 통과한 모델만 self._model에 발행한다.
         got = model.get_sentence_embedding_dimension()
         if got != self.dimension:
@@ -126,10 +127,10 @@ class _SentenceTransformerBackend(EmbeddingBackend):
         return vec.tolist()
 
 
-def get_backend(embedding_model: str = "kure") -> EmbeddingBackend:
+def get_backend(embedding_model: str = "kure", device: str = "cpu") -> EmbeddingBackend:
     """임베딩 모델명 → 백엔드. (kure | bge_m3)"""
     if embedding_model not in HF_ID_BY_MODEL:
         raise ValueError(
             f"알 수 없는 임베딩 모델: {embedding_model} (가능: {list(HF_ID_BY_MODEL)})"
         )
-    return _SentenceTransformerBackend(embedding_model)
+    return _SentenceTransformerBackend(embedding_model, device)

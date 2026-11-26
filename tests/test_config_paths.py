@@ -76,3 +76,23 @@ def test_falls_back_to_cwd_when_project_root_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(config_mod, "find_project_root", lambda start=None: None)
 
     assert Config().data_dir == (tmp_path / "data").resolve()
+
+
+def test_search_tuning_env_defaults_and_overrides(monkeypatch):
+    """임베딩 장치·하이브리드 후보 수: 기본값은 기존 하드코딩(cpu, 20, 30)과 같고 환경변수로 바뀐다."""
+    from rag_mcp.config import Config
+
+    for name in ("RAG_EMBEDDING_DEVICE", "RAG_HYBRID_DENSE_CANDIDATES", "RAG_HYBRID_SPARSE_CANDIDATES"):
+        monkeypatch.delenv(name, raising=False)
+    cfg = Config()
+    assert (cfg.embedding_device, cfg.hybrid_dense_candidates, cfg.hybrid_sparse_candidates) == ("cpu", 20, 30)
+
+    monkeypatch.setenv("RAG_EMBEDDING_DEVICE", "cuda")
+    monkeypatch.setenv("RAG_HYBRID_DENSE_CANDIDATES", "40")
+    monkeypatch.setenv("RAG_HYBRID_SPARSE_CANDIDATES", "50")
+    cfg = Config()
+    assert (cfg.embedding_device, cfg.hybrid_dense_candidates, cfg.hybrid_sparse_candidates) == ("cuda", 40, 50)
+
+    monkeypatch.setenv("RAG_HYBRID_DENSE_CANDIDATES", "0")
+    with pytest.raises(ValueError):
+        Config()
