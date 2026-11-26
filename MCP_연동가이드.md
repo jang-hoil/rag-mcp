@@ -84,7 +84,7 @@ stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰�
 | `get_page_image` | 원본 페이지를 **실제 이미지(PNG)** 로 반환. 한 번에 최대 5쪽. 이미 렌더된 페이지는 캐시에서 꺼내므로 원본 PDF가 없어도 된다 |
 | `ingest_pdf` | PDF 색인을 **백그라운드로 시작**하고 즉시 `job_id` 반환(비블로킹) |
 | `ingest_status` | `ingest_pdf`가 준 `job_id`로 진행 상태 조회(`running`/`done`/`error`) |
-| `get_chunk` | `chunk_id` 단건 조회 |
+| `get_chunk` | `chunk_id` 단건 조회. `neighbors=N`(0~5)이면 앞뒤 N개 청크를 `before`/`after`로 함께 반환 |
 | `list_documents` | 색인된 문서 목록(연도·청크수·상태) |
 | `delete_document` | 문서 삭제(`confirm=True`만 실제 실행) |
 | `reindex_document` | 재색인(기본 `reparse=False`로 parsed 재사용) |

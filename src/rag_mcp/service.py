@@ -23,7 +23,7 @@ from .models import Chunk
 from .mutation_lock import DataMutationLock
 from .page_render import render_pages
 from .request_models import DocumentMetadata, JsonValue, SearchFilters
-from .retrieval import Retriever
+from .retrieval import Retriever, has_chunk_sequence
 from .vector_store import VectorStore, open_qdrant_client
 
 # 검색 상한 (MCP는 LLM이 인자를 채우므로 과도한 limit 방어)
@@ -381,15 +381,33 @@ class RagService:
         )
         return response
 
-    def get_chunk(self, chunk_id: str, embedding_model: str | None = None) -> dict:
+    MAX_NEIGHBORS = 5
+
+    def get_chunk(
+        self, chunk_id: str, embedding_model: str | None = None, neighbors: int = 0,
+    ) -> dict:
         model = embedding_model or self.config.embedding_model
+        if not isinstance(neighbors, int) or not 0 <= neighbors <= self.MAX_NEIGHBORS:
+            return {
+                "ok": False,
+                "error": f"neighbors는 0 이상 {self.MAX_NEIGHBORS} 이하여야 합니다: {neighbors!r}",
+            }
         if "::" not in chunk_id:
             return {"ok": False, "error": f"청크 없음: {chunk_id}"}
         document_id = chunk_id.split("::", 1)[0]
-        r = self._retriever(model, document_id).get_chunk(chunk_id)
+        retriever = self._retriever(model, document_id)
+        r = retriever.get_chunk(chunk_id)
         if r is None:
             return {"ok": False, "error": f"청크 없음: {chunk_id}"}
-        return {"ok": True, **r.model_dump()}
+        response = {"ok": True, **r.model_dump()}
+        if neighbors:
+            response["before"], response["after"] = retriever.get_neighbors(chunk_id, neighbors)
+            if not has_chunk_sequence(chunk_id):
+                response["notice"] = (
+                    "이 chunk_id에는 문서 내 순번(`::c숫자`)이 없어 앞뒤 청크를 찾을 수 없습니다. "
+                    "reindex_document(reparse=True)로 재색인하면 순번이 붙습니다."
+                )
+        return response
 
     def get_page_image(
         self,

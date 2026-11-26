@@ -433,6 +433,21 @@ class VectorStore:
             )
         return recs[0] if recs else None
 
+    def retrieve_chunks(self, chunk_ids: list[str]) -> list:
+        """여러 chunk_id를 한 번에 조회. 없는 것은 빠지며 순서는 보장하지 않는다."""
+        if not chunk_ids:
+            return []
+        with self._lock:
+            if not self.client.collection_exists(self.collection):
+                return []
+            return list(
+                self.client.retrieve(
+                    self.collection,
+                    ids=[point_id_for(chunk_id) for chunk_id in chunk_ids],
+                    with_payload=True,
+                )
+            )
+
     def count_by_document(self, document_id: str) -> int:
         with self._lock:
             if not self.client.collection_exists(self.collection):

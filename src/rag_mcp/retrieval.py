@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import re
 import threading
 
 from qdrant_client.models import ScoredPoint
@@ -31,6 +32,29 @@ class SearchOutcome:
     filtered_by_dense: int
     filtered_by_relative: int
     notices: tuple[str, ...] = ()
+
+
+_CHUNK_SEQ = re.compile(r"^(?P<doc>.+)::c(?P<seq>\d+)$")
+
+
+def has_chunk_sequence(chunk_id: str) -> bool:
+    """chunk_id가 `문서ID::c순번` 형식인지(앞뒤 청크 계산 가능 여부)."""
+    return _CHUNK_SEQ.match(chunk_id) is not None
+
+
+def neighbor_chunk_ids(chunk_id: str, n: int) -> tuple[list[str], list[str]]:
+    """`문서ID::c순번`에서 앞뒤 n개의 chunk_id를 읽기 순서대로 계산한다.
+
+    청커가 표·본문 공통 연번으로 chunk_id를 매기므로(chunking.build_chunks) 순번이 곧
+    문서 내 읽기 순서다. 별도 순번 필드·재색인이 필요 없다. 형식이 다르면 ([], []).
+    """
+    match = _CHUNK_SEQ.match(chunk_id)
+    if match is None or n <= 0:
+        return [], []
+    doc, seq = match.group("doc"), int(match.group("seq"))
+    before = [f"{doc}::c{i}" for i in range(max(0, seq - n), seq)]
+    after = [f"{doc}::c{i}" for i in range(seq + 1, seq + n + 1)]
+    return before, after
 
 
 def _source_from_payload(payload: dict) -> SearchSource:
@@ -259,4 +283,24 @@ class Retriever:
         return SearchResult(
             chunk_id=chunk_id, text=payload.get("text", ""), score=1.0,
             matched_by=[], source=_source_from_payload(payload),
+        )
+
+    def get_neighbors(self, chunk_id: str, n: int) -> tuple[list[dict], list[dict]]:
+        """앞뒤 n개 청크를 읽기 순서로 반환한다(없는 순번은 건너뜀). 조회는 1회."""
+        before_ids, after_ids = neighbor_chunk_ids(chunk_id, n)
+        if not before_ids and not after_ids:
+            return [], []
+        found: dict[str, dict] = {}
+        for rec in self.store.retrieve_chunks(before_ids + after_ids):
+            payload = rec.payload or {}
+            cid = payload.get("chunk_id")
+            if cid:
+                found[cid] = {
+                    "chunk_id": cid,
+                    "text": payload.get("text", ""),
+                    "source": _source_from_payload(payload).model_dump(),
+                }
+        return (
+            [found[c] for c in before_ids if c in found],
+            [found[c] for c in after_ids if c in found],
         )

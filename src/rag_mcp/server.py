@@ -179,9 +179,15 @@ async def ingest_status(job_id: str) -> dict:
 
 
 @mcp.tool()
-async def get_chunk(chunk_id: str, embedding_model: str | None = None) -> dict:
-    """chunk_id로 단건 조회."""
-    return await _run(service().get_chunk, chunk_id, embedding_model=embedding_model)
+async def get_chunk(
+    chunk_id: str, embedding_model: str | None = None, neighbors: int = 0,
+) -> dict:
+    """chunk_id로 단건 조회. neighbors=N(0~5)이면 같은 문서의 앞뒤 N개 청크를
+    읽기 순서대로 before/after에 함께 돌려준다 — 조항·표가 청크 경계에서 잘렸을 때
+    문맥을 보완하는 용도(재색인 불필요)."""
+    return await _run(
+        service().get_chunk, chunk_id, embedding_model=embedding_model, neighbors=neighbors,
+    )
 
 
 @mcp.tool()
