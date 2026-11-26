@@ -102,8 +102,10 @@ stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰�
 3. 같은 `RAG_DATA_DIR`를 사용하는 MCP·CLI 전체에서 쓰기 작업을 **1개만** 허용한다.
    server 모드의 별도 프로세스가 같은 문서를 동시에 요청해도 후발 요청은 `status="busy"`로
    즉시 반환된다. 자동 대기열은 없으므로 먼저 시작한 작업이 끝난 뒤 다시 요청한다.
-4. job 상태는 인메모리 → 서버 재시작 시 사라지지만, 색인 결과 자체는 manifest에
-   영구 저장되므로 `list_documents`로 최종 결과를 확인할 수 있다.
+4. job 상태는 인메모리지만 **마지막 job 1건**은 `data/jobs/last_ingest_job.json`에 남아
+   서버 재시작 후에도 `ingest_status`로 조회된다(진행 중에 꺼졌다면 '중단됨'으로 보고).
+   그 이전 job은 사라지지만 색인 결과 자체는 manifest에 영구 저장되므로 `list_documents`로
+   최종 결과를 확인할 수 있다.
 
 `ingest_pdf`는 전달한 PDF를 매번 새로 파싱한 뒤 색인한다. 색인 중에는 다른 변경 작업
 (`ingest_pdf`, `ingest_chunks`, `delete_document`, `reindex_document`, `set_source_path`)이 실행되지 않고

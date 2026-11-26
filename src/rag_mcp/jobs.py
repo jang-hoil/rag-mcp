@@ -7,15 +7,21 @@ job은 단계(stage)와 진척도를 함께 들고 있다. status만으로는 �
 "지금 뭘 하는 중이고 얼마나 남았는지"를 말해줄 수 없어, 폴링해도 침묵하게 되기 때문이다.
 to_dict()가 한국어 message까지 만들어 주므로 클라이언트는 그대로 옮기기만 하면 된다.
 
-MCP 서버는 단일 stdio 프로세스이므로 job 상태는 인메모리로 충분하다(스레드 안전 dict).
+MCP 서버는 단일 stdio 프로세스이므로 job 상태는 인메모리로 관리한다(스레드 안전 dict).
 색인 결과 자체는 manifest에 영구 저장되므로 서버 재시작으로 job이 사라져도 데이터는 안전.
+다만 재시작 후에도 "방금 그 색인 어떻게 됐지?"에 답하도록 **마지막 job 1건**만
+persist_path(JSON)에 남긴다(생성·완료·실패 시점). 진행 중에 서버가 꺼졌다면 그 job은
+재시작 후 '중단됨' 실패로 보고한다.
 """
 from __future__ import annotations
 
+import json
+import os
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, fields
+from pathlib import Path
 from typing import Optional
 
 # 단계 이름은 클라이언트가 사용자에게 그대로 보여주는 값이라 한국어로 고정한다.
@@ -98,9 +104,41 @@ class Job:
 class JobStore:
     """스레드 안전 job 레지스트리."""
 
-    def __init__(self) -> None:
+    def __init__(self, persist_path: Path | None = None) -> None:
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
+        self._persist_path = persist_path
+
+    def _persist(self, job: Job) -> None:
+        """마지막 job 1건을 원자적으로 기록한다(락 안에서 호출). 실패해도 색인은 계속."""
+        if self._persist_path is None:
+            return
+        try:
+            self._persist_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._persist_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(asdict(job), ensure_ascii=False, default=str), encoding="utf-8")
+            os.replace(tmp, self._persist_path)
+        except OSError:
+            pass
+
+    def _load_persisted(self, job_id: str) -> Job | None:
+        """재시작 전 마지막 job이 job_id와 같으면 복원한다."""
+        if self._persist_path is None:
+            return None
+        try:
+            data = json.loads(self._persist_path.read_text(encoding="utf-8"))
+            if data.get("job_id") != job_id:
+                return None
+            job = Job(**{f.name: data[f.name] for f in fields(Job) if f.name in data})
+        except (OSError, ValueError, TypeError):
+            return None
+        if job.status == "running":
+            job.status = "error"
+            job.error = ("서버가 재시작되어 색인이 중단되었습니다. "
+                         "list_documents로 상태를 확인하고 필요하면 다시 색인하세요")
+            job.stage = STAGE_FAILED
+            job.finished_at = job.started_at
+        return job
 
     def create(self, document_id: str | None = None) -> Job:
         job = Job(job_id=uuid.uuid4().hex, status="running",
@@ -108,11 +146,13 @@ class JobStore:
                   stage=STAGE_WAITING)
         with self._lock:
             self._jobs[job.job_id] = job
+            self._persist(job)
         return job
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:
-            return self._jobs.get(job_id)
+            job = self._jobs.get(job_id)
+            return job if job is not None else self._load_persisted(job_id)
 
     def progress(self, job_id: str, stage: str, processed: int = 0, total: int = 0) -> None:
         """색인 스레드가 단계 전환·진척을 보고한다(끝난 job은 갱신하지 않음)."""
@@ -134,6 +174,7 @@ class JobStore:
                 num_chunks = result.get("num_chunks")
                 if isinstance(num_chunks, int):
                     j.processed = j.total = num_chunks
+                self._persist(j)
 
     def fail(self, job_id: str, error: str) -> None:
         with self._lock:
@@ -143,6 +184,7 @@ class JobStore:
                 j.error = error
                 j.finished_at = time.time()
                 j.stage = STAGE_FAILED
+                self._persist(j)
 
     def running(self) -> list[Job]:
         with self._lock:

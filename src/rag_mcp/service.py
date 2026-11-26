@@ -170,7 +170,7 @@ class RagService:
         self._qdrant_client = None
         self.manifests = ManifestStore(self.config)
         # 비동기 job 추적과 같은 데이터 폴더의 MCP/CLI 전체 쓰기 1개 제한.
-        self.jobs = JobStore()
+        self.jobs = JobStore(self.config.data_dir / "jobs" / "last_ingest_job.json")
         self._submit_lock = threading.Lock()
         self._mutation_state_lock = threading.Lock()
         self._active_mutation: dict[str, str | None] | None = None
@@ -918,7 +918,7 @@ class RagService:
         if j is None:
             return {
                 "ok": False,
-                "error": (f"작업 없음: {job_id} (서버 재시작 시 진행 중 작업 정보는 사라집니다. "
-                          "list_documents로 색인 결과를 확인하세요.)"),
+                "error": (f"작업 없음: {job_id} (서버 재시작 후에는 마지막 색인 작업 1건만 "
+                          "조회됩니다. list_documents로 색인 결과를 확인하세요.)"),
             }
         return {"ok": True, **j.to_dict()}
