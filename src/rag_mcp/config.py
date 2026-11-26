@@ -86,15 +86,6 @@ class Config:
     qdrant_path: Path = field(default_factory=_default_qdrant_path)
     qdrant_url: str = field(default_factory=lambda: _env("RAG_QDRANT_URL", ""))
     embedding_model: str = field(default_factory=lambda: _env("RAG_EMBEDDING_MODEL", "kure"))
-    # 임베딩 연산 장치(SentenceTransformer device). GPU가 있으면 "cuda" 등으로 바꾼다.
-    embedding_device: str = field(default_factory=lambda: _env("RAG_EMBEDDING_DEVICE", "cpu"))
-    # 하이브리드 검색에서 융합 전에 가져올 후보 수(의미 dense / 키워드 sparse). top_k가 더 크면 top_k.
-    hybrid_dense_candidates: int = field(
-        default_factory=lambda: int(_env("RAG_HYBRID_DENSE_CANDIDATES", "20"))
-    )
-    hybrid_sparse_candidates: int = field(
-        default_factory=lambda: int(_env("RAG_HYBRID_SPARSE_CANDIDATES", "30"))
-    )
     render_dpi: int = field(default_factory=lambda: int(_env("RAG_RENDER_DPI", "200")))
     # 화면 확인 DPI는 색인 렌더(render_dpi)와 같은 200으로 둔다. 실측상 A4 한 쪽이
     # 2000x1501 PNG 0.2~0.6MB라 낮출 이유가 없고, 캐시 PNG를 재인코딩 없이 그대로 쓸 수 있다.
@@ -160,6 +151,16 @@ class Config:
         default_factory=lambda: int(_env("RAG_LOG_MAX_BYTES", "5000000"))
     )
     log_backups: int = field(default_factory=lambda: int(_env("RAG_LOG_BACKUPS", "3")))
+    # --- 아래는 나중에 추가된 필드: 기존 위치 인자 순서를 깨지 않도록 항상 맨 뒤에 둔다. ---
+    # 임베딩 연산 장치(SentenceTransformer device). GPU가 있으면 "cuda" 등으로 바꾼다.
+    embedding_device: str = field(default_factory=lambda: _env("RAG_EMBEDDING_DEVICE", "cpu"))
+    # 하이브리드 검색에서 융합 전에 가져올 후보 수(의미 dense / 키워드 sparse). top_k가 더 크면 top_k.
+    hybrid_dense_candidates: int = field(
+        default_factory=lambda: int(_env("RAG_HYBRID_DENSE_CANDIDATES", "20"))
+    )
+    hybrid_sparse_candidates: int = field(
+        default_factory=lambda: int(_env("RAG_HYBRID_SPARSE_CANDIDATES", "30"))
+    )
 
     def __post_init__(self) -> None:
         if self.qdrant_mode not in {"local", "server"}:

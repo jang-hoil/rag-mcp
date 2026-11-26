@@ -96,3 +96,14 @@ def test_search_tuning_env_defaults_and_overrides(monkeypatch):
     monkeypatch.setenv("RAG_HYBRID_DENSE_CANDIDATES", "0")
     with pytest.raises(ValueError):
         Config()
+
+
+def test_new_config_fields_do_not_shift_positional_order():
+    """나중에 추가한 필드는 맨 뒤에 있어야 기존 위치 인자 호출(예: 6번째=render_dpi)이 깨지지 않는다."""
+    from dataclasses import fields
+
+    from rag_mcp.config import Config
+
+    names = [f.name for f in fields(Config)]
+    assert names[-3:] == ["embedding_device", "hybrid_dense_candidates", "hybrid_sparse_candidates"]
+    assert names.index("render_dpi") < names.index("embedding_device")
