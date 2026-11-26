@@ -18,6 +18,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
+    "ruff>=0.8.0",
 ]
 ocr = [
     "pytesseract>=0.3.10",
@@ -38,3 +39,10 @@ packages = ["src/rag_mcp"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+# 최소 규칙: 문법 오류(E9)·pyflakes(F: 미사용 import, 미정의 이름 등)만. 스타일 강제 없음.
+select = ["E9", "F"]

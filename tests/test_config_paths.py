@@ -8,7 +8,6 @@ PermissionError로 서버가 즉사했다. 쓰기 가능한 엉뚱한 폴더였�
 규칙: RAG_DATA_DIR가 있으면 그것, 없으면 **프로젝트 루트**(pyproject.toml이 있는 폴더)의
 data. 프로젝트 루트를 못 찾으면(패키지만 설치된 경우) 예전처럼 cwd 기준으로 물러선다.
 """
-import os
 from pathlib import Path
 
 import pytest

@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    # Windows: 프로젝트 대상 OS이고(Windows 전용 테스트 포함), PyPI torch가 CPU 전용이라 설치가 가볍다.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --locked --extra dev
+      - run: uv run ruff check .
+      # 테스트는 FakeEmbeddingBackend(tests/conftest.py)로 모델 없이 돈다.
+      # 실제 모델·서버 spawn 테스트는 환경변수 게이트로 자동 skip.
+      - run: uv run pytest -q
