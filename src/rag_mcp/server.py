@@ -64,6 +64,11 @@ class TimestampedLogStream:
 
     print는 본문과 줄바꿈을 따로 write하므로 줄 시작 여부를 상태로 기억한다.
     write/flush 외 속성(close·fileno·encoding 등)은 원본 스트림에 위임한다.
+
+    파일 쓰기 실패(OSError — 디스크 가득 참, 다른 인스턴스와의 충돌 등)는 삼킨다. 로그 한 줄을
+    잃는 편이 도구 호출 전체가 예외로 죽는 것보다 낫고, 실패를 다시 stderr(=자기 자신)로
+    보고하면 재귀하므로 어디에도 다시 쓰지 않는다. 로그 회전은 기동 시에만 하므로(실행 중
+    회전 없음) 같은 파일을 여러 프로세스가 열어도 회전 경합이 생기지 않는다.
     """
 
     def __init__(self, stream) -> None:
@@ -81,11 +86,17 @@ class TimestampedLogStream:
                     parts.append(datetime.now().strftime("[%Y-%m-%d %H:%M:%S] "))
                 parts.append(piece)
                 self._at_line_start = piece.endswith(("\n", "\r"))
-            self._stream.write("".join(parts))
+            try:
+                self._stream.write("".join(parts))
+            except (OSError, ValueError):  # ValueError: 이미 닫힌 파일
+                pass
         return len(text)
 
     def flush(self) -> None:
-        self._stream.flush()
+        try:
+            self._stream.flush()
+        except (OSError, ValueError):
+            pass
 
     def __getattr__(self, name: str):
         return getattr(self._stream, name)

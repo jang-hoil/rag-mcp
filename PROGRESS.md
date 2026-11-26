@@ -15,7 +15,7 @@
   `ingest_status`, `get_chunk`, `get_page_image`, `list_documents`, `delete_document`,
   `reindex_document`, `collection_status`, `set_source_path`, `review_before_ingest`).
 - 저장소: Qdrant **server 모드**(localhost HTTP) 운영, 문서별 컬렉션 분리. local path 모드도 지원.
-- 서버 로그: `data/logs/server.log`(시각 포함, 5MB 회전).
+- 서버 로그: `data/logs/server.log`(줄마다 시각, 기동 시에만 `RAG_LOG_MAX_BYTES` 초과분 회전 — 0이면 끔, 보관 `RAG_LOG_BACKUPS`개). 여러 인스턴스가 같은 파일에 이어 쓰며, 쓰기 실패는 삼킨다.
 - CI: GitHub Actions(Windows, uv + ruff + pytest — 가짜 임베딩으로 모델 없이 실행).
 - 개선점 검토 리포트 반영 진행 중: 코드·문서 항목은 이 브랜치에서, 데이터 정리 항목
   (2·5·6·13번)은 본 저장소에서 별도로 진행.

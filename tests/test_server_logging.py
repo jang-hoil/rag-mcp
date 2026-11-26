@@ -197,6 +197,65 @@ def test_log_settings_are_validated(monkeypatch, key, value):
         Config()
 
 
+# --- 여러 인스턴스가 같은 server.log를 쓸 때 (검증 지적: 회전 시 RecursionError·유실) ---
+
+
+def test_startup_rotation_with_log_held_open_by_another_instance(tmp_path, monkeypatch):
+    """다른 인스턴스가 server.log를 열어 둔 상태에서 크기 초과로 기동해도 예외 없이 이어 쓴다.
+
+    Windows에서는 열린 파일의 이름 변경이 실제로 실패한다(monkeypatch 아닌 실제 핸들).
+    실행 중 회전은 하지 않으므로 이후 쓰기도 두 인스턴스 모두 같은 파일에 남는다.
+    """
+    monkeypatch.setenv("RAG_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RAG_LOG_MAX_BYTES", "100")
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    log = log_dir / "server.log"
+    log.write_text("기존 인스턴스 로그\n" * 20, encoding="utf-8")
+
+    with log.open("a", encoding="utf-8", buffering=1) as other_instance:
+        with _redirected(Config()) as path:
+            assert path == log
+            for i in range(200):  # 한도의 수십 배를 써도 실행 중 회전·예외 없음
+                print(f"새 인스턴스 {i}", file=sys.stderr)
+            other_instance.write("다른 인스턴스 계속 기록\n")
+            sys.stderr.flush()
+
+    text = "".join(
+        p.read_text(encoding="utf-8") for p in sorted(log_dir.glob("server.log*"))
+    )
+    assert "새 인스턴스 199" in text
+    assert "다른 인스턴스 계속 기록" in text
+
+
+def test_log_write_failure_is_swallowed_without_recursion(tmp_path, monkeypatch):
+    """파일 쓰기가 실패해도 print·logging이 예외(RecursionError 포함)를 내지 않는다."""
+    import logging
+
+    class BrokenFile:
+        def write(self, _text):
+            raise OSError(28, "No space left on device")
+
+        def flush(self):
+            raise OSError(28, "No space left on device")
+
+        def close(self):
+            pass
+
+    original = sys.stderr
+    sys.stderr = server_mod.TimestampedLogStream(BrokenFile())
+    handler = logging.StreamHandler()  # 기본 stream = 현재 sys.stderr(깨진 파일)
+    logger = logging.getLogger("rag_mcp.test_broken_log")
+    logger.addHandler(handler)
+    logger.propagate = False
+    try:
+        print("기록 실패해도 계속", file=sys.stderr, flush=True)
+        logger.warning("핸들러 오류가 같은 stderr로 되돌아와도 재귀하지 않는다")
+    finally:
+        logger.removeHandler(handler)
+        sys.stderr = original
+
+
 # --- 실제 서버 프로세스로 재현·회귀 (무거워서 기본 제외) ---
 
 _RUN_SERVER = os.environ.get("RAG_RUN_SERVER_TESTS") == "1"
