@@ -191,20 +191,20 @@ def test_cached_image_remains_readable_while_another_instance_indexes(cache_pipe
 
 
 def test_cache_disappearing_before_read_retries_without_raw_file_error(cache_pipeline, monkeypatch):
-    from rag_mcp import service as service_module
+    from rag_mcp import page_images as page_images_module
 
     config, source, _ = cache_pipeline
     owner, reader = RagService(config), RagService(config)
     render_pages(source, "manual", config, {1})
     token, _ = owner._reserve_mutation("ingest_pdf")
     assert token is not None
-    read_image = service_module._page_image_bytes
+    read_image = page_images_module._page_image_bytes
 
     def cache_was_invalidated(path, max_width):
         path.unlink(missing_ok=True)
         return read_image(path, max_width)
 
-    monkeypatch.setattr(service_module, "_page_image_bytes", cache_was_invalidated)
+    monkeypatch.setattr(page_images_module, "_page_image_bytes", cache_was_invalidated)
     try:
         with pytest.raises(ValueError, match="다시"):
             reader.get_page_image("manual", 1)
@@ -216,12 +216,12 @@ def test_cache_disappearing_before_read_retries_without_raw_file_error(cache_pip
 def test_image_generation_holds_os_lock_through_read_and_releases_on_error(
     cache_pipeline, monkeypatch, fail_read,
 ):
-    from rag_mcp import service as service_module
+    from rag_mcp import page_images as page_images_module
 
     config, source, _ = cache_pipeline
     reader, other = RagService(config), RagService(config)
     reader.manifests.update("manual", source_path=str(source), status="done")
-    read_image = service_module._page_image_bytes
+    read_image = page_images_module._page_image_bytes
     blocked = []
 
     def read_under_lock(path, max_width):
@@ -235,7 +235,7 @@ def test_image_generation_holds_os_lock_through_read_and_releases_on_error(
             raise ValueError("expected read failure")
         return read_image(path, max_width)
 
-    monkeypatch.setattr(service_module, "_page_image_bytes", read_under_lock)
+    monkeypatch.setattr(page_images_module, "_page_image_bytes", read_under_lock)
     if fail_read:
         with pytest.raises(ValueError, match="expected read failure"):
             reader.get_page_image("manual", 1)

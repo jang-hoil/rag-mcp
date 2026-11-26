@@ -36,6 +36,7 @@
 - `embeddings.py`(KURE lazy) · `rerank.py`(off|lexical|cross — lexical은 모델 불필요) · `vector_store.py`(dense+sparse, 각 Prefetch.filter)
 - `manifest.py`(atomic·멱등) · `indexer.py`(chunks.jsonl·reindex) · `retrieval.py`(search/get_chunk)
 - `jobs.py`(비동기 ingest job·JobStore) · `service.py`(도구 11개 로직·submit_ingest/ingest_status·review_before_ingest·get_page_image)
+- `page_images.py`(get_page_image 캐시·렌더·PNG 변환) · `mutation_lock.py`(쓰기 잠금 MutationGuard·OS 파일락)
 - `server.py`(MCPServer·MCP SDK v2, async+anyio.to_thread) · `cli.py`(동기 ingest 유지)
 - 테스트: 모두 FakeEmbeddingBackend(`tests/conftest.py`)로 모델 없이 구동.
 
