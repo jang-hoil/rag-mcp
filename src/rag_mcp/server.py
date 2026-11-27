@@ -39,6 +39,9 @@ def rotate_log_if_needed(path: Path, max_bytes: int, backups: int) -> bool:
     WARNING 레벨이라 실행 중 증가는 미미하다. 또 여러 인스턴스(Codex·Claude)가 같은 파일에
     이어 쓰므로 실행 중 회전은 Windows에서 실패한다. 이름 변경이 막히면(다른 인스턴스가
     열고 있음) 이번 회전만 건너뛰고 False — 서버 기동을 막지 않는다.
+
+    순서가 중요하다: 활성 로그를 먼저 임시 이름으로 옮겨 본 뒤(=회전 가능 확인) 성공했을 때만
+    백업을 민다. 활성 로그가 막혀 있으면 기존 백업은 하나도 건드리지 않는다.
     """
     if max_bytes <= 0:
         return False
@@ -47,14 +50,27 @@ def rotate_log_if_needed(path: Path, max_bytes: int, backups: int) -> bool:
             return False
     except FileNotFoundError:
         return False
+    staged = path.with_name(f"{path.name}.rotating")
+    try:
+        os.replace(path, staged)
+    except OSError:
+        return False  # 다른 인스턴스가 열고 있음 — 백업은 그대로 둔다
     try:
         path.with_name(f"{path.name}.{backups}").unlink(missing_ok=True)
         for index in range(backups - 1, 0, -1):
             older = path.with_name(f"{path.name}.{index}")
             if older.exists():
                 os.replace(older, path.with_name(f"{path.name}.{index + 1}"))
-        os.replace(path, path.with_name(f"{path.name}.1"))
+        os.replace(staged, path.with_name(f"{path.name}.1"))
     except OSError:
+        # 백업 밀기 중 실패: 옮겨 둔 활성 로그를 잃지 않도록 비어 있는 .1 또는 원래 자리로 되돌린다.
+        for target in (path.with_name(f"{path.name}.1"), path):
+            try:
+                if not target.exists():
+                    os.replace(staged, target)
+                    break
+            except OSError:
+                continue
         return False
     return True
 
@@ -81,15 +97,18 @@ class TimestampedLogStream:
             return 0
         with self._lock:
             parts: list[str] = []
+            at_line_start = self._at_line_start
             for piece in text.splitlines(keepends=True):
-                if self._at_line_start:
+                if at_line_start:
                     parts.append(datetime.now().strftime("[%Y-%m-%d %H:%M:%S] "))
                 parts.append(piece)
-                self._at_line_start = piece.endswith(("\n", "\r"))
+                at_line_start = piece.endswith(("\n", "\r"))
             try:
                 self._stream.write("".join(parts))
             except (OSError, ValueError):  # ValueError: 이미 닫힌 파일
-                pass
+                # 기록 실패 시 줄 시작 상태를 바꾸지 않는다 — 다음 조각에도 시각이 붙는다.
+                return len(text)
+            self._at_line_start = at_line_start
         return len(text)
 
     def flush(self) -> None:
