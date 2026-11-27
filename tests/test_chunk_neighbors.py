@@ -3,8 +3,6 @@
 chunk_id는 색인 시 이미 `문서ID::c순번`(읽기 순서, 표·본문 공통 연번)으로 저장된다.
 따라서 순번 필드나 재색인 없이 이웃 청크 ID를 계산해 한 번에 조회할 수 있다.
 """
-import os
-
 import pytest
 
 from rag_mcp.config import Config
@@ -14,14 +12,11 @@ from rag_mcp.service import RagService
 
 
 @pytest.fixture
-def svc(tmp_path, fake_backend):
-    os.environ["RAG_QDRANT_PATH"] = str(tmp_path / "qdrant")
-    os.environ["RAG_DATA_DIR"] = str(tmp_path)
-    try:
-        yield RagService(Config(), backend=fake_backend)
-    finally:
-        os.environ.pop("RAG_QDRANT_PATH", None)
-        os.environ.pop("RAG_DATA_DIR", None)
+def svc(tmp_path, fake_backend, monkeypatch):
+    # monkeypatch는 테스트 후 사용자가 설정해 둔 원래 값을 그대로 복원한다.
+    monkeypatch.setenv("RAG_QDRANT_PATH", str(tmp_path / "qdrant"))
+    monkeypatch.setenv("RAG_DATA_DIR", str(tmp_path))
+    return RagService(Config(), backend=fake_backend)
 
 
 def _seed(svc, document_id="d1", indexes=range(5)):
