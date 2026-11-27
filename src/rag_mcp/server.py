@@ -32,6 +32,18 @@ mcp = MCPServer("rag-mcp", log_level="WARNING")
 _service: RagService | None = None
 
 
+def _place_staged(staged: Path, path: Path) -> bool:
+    """옮겨 둔 활성 로그를 비어 있는 .1 또는 원래 자리로 되돌린다(기존 파일은 덮어쓰지 않음)."""
+    for target in (path.with_name(f"{path.name}.1"), path):
+        try:
+            if not target.exists():
+                os.replace(staged, target)
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def rotate_log_if_needed(path: Path, max_bytes: int, backups: int) -> bool:
     """기동 시 로그가 max_bytes 이상이면 server.log → .1 → .2 … 로 밀어낸다(가장 오래된 것 삭제).
 
@@ -40,21 +52,28 @@ def rotate_log_if_needed(path: Path, max_bytes: int, backups: int) -> bool:
     이어 쓰므로 실행 중 회전은 Windows에서 실패한다. 이름 변경이 막히면(다른 인스턴스가
     열고 있음) 이번 회전만 건너뛰고 False — 서버 기동을 막지 않는다.
 
-    순서가 중요하다: 활성 로그를 먼저 임시 이름으로 옮겨 본 뒤(=회전 가능 확인) 성공했을 때만
-    백업을 민다. 활성 로그가 막혀 있으면 기존 백업은 하나도 건드리지 않는다.
+    순서가 중요하다: 이전 기동이 회전 도중 죽어 남긴 .rotating을 먼저 복구하고, 백업마다
+    제자리 이름 변경으로 옮길 수 있는지(열려 있지 않은지) 확인한 뒤, 활성 로그를 임시 이름으로
+    옮겨 본다. 그 셋이 모두 될 때만 가장 오래된 백업을 지우고 민다.
     """
     if max_bytes <= 0:
         return False
+    staged = path.with_name(f"{path.name}.rotating")
+    if staged.exists() and not _place_staged(staged, path):
+        return False  # 미완료 회전의 로그를 둘 빈자리가 없음 — 덮어쓰지 않고 건너뛴다
     try:
         if path.stat().st_size < max_bytes:
             return False
     except FileNotFoundError:
         return False
-    staged = path.with_name(f"{path.name}.rotating")
     try:
+        for index in range(1, backups + 1):
+            backup = path.with_name(f"{path.name}.{index}")
+            if backup.exists():
+                os.replace(backup, backup)  # Windows: 열린 파일이면 여기서 거부된다
         os.replace(path, staged)
     except OSError:
-        return False  # 다른 인스턴스가 열고 있음 — 백업은 그대로 둔다
+        return False  # 활성 로그나 백업을 누가 열고 있음 — 아무것도 옮기지 않았다
     try:
         path.with_name(f"{path.name}.{backups}").unlink(missing_ok=True)
         for index in range(backups - 1, 0, -1):
@@ -63,14 +82,7 @@ def rotate_log_if_needed(path: Path, max_bytes: int, backups: int) -> bool:
                 os.replace(older, path.with_name(f"{path.name}.{index + 1}"))
         os.replace(staged, path.with_name(f"{path.name}.1"))
     except OSError:
-        # 백업 밀기 중 실패: 옮겨 둔 활성 로그를 잃지 않도록 비어 있는 .1 또는 원래 자리로 되돌린다.
-        for target in (path.with_name(f"{path.name}.1"), path):
-            try:
-                if not target.exists():
-                    os.replace(staged, target)
-                    break
-            except OSError:
-                continue
+        _place_staged(staged, path)  # 확인 후에 막힌 경우: 옮겨 둔 활성 로그만은 잃지 않는다
         return False
     return True
 
