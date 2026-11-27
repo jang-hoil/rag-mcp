@@ -252,8 +252,8 @@ class Retriever:
 
         converted = [self._to_result(point) for point in kept]
         reranked = self.reranker.rerank(query, converted)[:top_k]
-        # matched_by의 sparse 판정은 청크 텍스트를 다시 형태소 분석한다 → 리랭크 후보 전체가 아니라
-        # 최종 top_k에만 계산한다(리랭커가 matched_by를 쓰지 않으므로 결과 동일).
+        # matched_by의 sparse 판정은 최종 top_k에만 계산한다(리랭커가 matched_by를 쓰지 않으므로
+        # 결과 동일). lexical 리랭커가 이미 분석한 본문은 tokenize 캐시로 재사용된다.
         for result in reranked:
             result.matched_by = _matched_by(result.text, search_mode, q_sparse_idx)
         return SearchOutcome(

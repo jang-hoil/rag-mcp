@@ -1,8 +1,7 @@
-"""재검증 지적 재현: job별 소유권 판정, 완료 경계 재확인, 스레드 시작 실패 기록.
+"""다른 프로세스가 만든 job 조회와 스레드 시작 실패 기록.
 
-- 다른 문서의 쓰기 작업이 공용 잠금을 잡아도, 소유 프로세스가 죽은 job은 계속 '중단'이다.
+- 다른 프로세스의 running job은 생사를 단정하지 않고 마지막 진척 + note로 안내한다.
 - 상태 조회는 잠금을 잡지 않으므로 정상 쓰기 요청이 busy를 받지 않는다.
-- 소유자 확인이 불가능하면 예외 대신 running + owner_check로 알린다.
 """
 import json
 import subprocess
@@ -11,9 +10,7 @@ import textwrap
 
 import pytest
 
-from rag_mcp import jobs as jobs_mod
 from rag_mcp.config import Config
-from rag_mcp.jobs import OWNER_ALIVE, OWNER_DEAD, JobStore, default_owner_state
 from rag_mcp.service import RagService
 
 _OWNER_SCRIPT = textwrap.dedent(
@@ -52,15 +49,19 @@ def _service(tmp_path, fake_backend):
     return RagService(cfg, backend=fake_backend)
 
 
-def test_job_of_live_owner_process_is_running(tmp_path, fake_backend, owner_process):
-    _proc, job_id = owner_process
+def test_other_process_job_is_reported_without_verdict(tmp_path, fake_backend, owner_process):
+    """살아 있든 죽었든 다른 프로세스의 job은 running + 마지막 진척 + 비단정 안내로 답한다."""
+    proc, job_id = owner_process
     observer = _service(tmp_path, fake_backend)
 
-    status = observer.ingest_status(job_id)
-
-    assert status["ok"] is True and status["status"] == "running"
-    assert (status["processed"], status["total"]) == (75, 100)
-    assert status["owner_check"] is None
+    for _ in range(2):  # 소유 프로세스 생존 중 → 종료 후
+        status = observer.ingest_status(job_id)
+        assert status["ok"] is True and status["status"] == "running"
+        assert (status["processed"], status["total"]) == (75, 100)
+        assert "이 서버 인스턴스에서 실행 중인 작업이 아님" in status["note"]
+        assert "list_documents" in status["message"]
+        proc.kill()
+        proc.wait(timeout=10)
 
 
 def test_status_query_does_not_make_writes_busy(tmp_path, fake_backend, owner_process):
@@ -73,75 +74,10 @@ def test_status_query_does_not_make_writes_busy(tmp_path, fake_backend, owner_pr
     token, busy = writer._reserve_mutation("reindex_document")
     try:
         assert busy is None
-        # 다른 작업이 잠금을 쥐고 있는 동안에도 조회는 예외 없이 소유자 기준으로 답한다.
+        # 다른 작업이 잠금을 쥐고 있는 동안에도 조회는 예외 없이 답한다.
         assert observer.ingest_status(job_id)["status"] == "running"
     finally:
         writer._release_mutation(token)
-
-
-def test_dead_owner_stays_interrupted_while_another_write_holds_lock(
-    tmp_path, fake_backend, owner_process
-):
-    """소유 프로세스 종료 후, 다른 문서의 쓰기 잠금이 잡혀도 같은 job이 running으로 되살아나지 않는다."""
-    proc, job_id = owner_process
-    proc.kill()
-    proc.wait(timeout=10)
-    observer = _service(tmp_path, fake_backend)
-    other_writer = _service(tmp_path, fake_backend)
-
-    assert observer.ingest_status(job_id)["status"] == "error"
-    token, busy = other_writer._reserve_mutation("reindex_document")
-    assert busy is None
-    try:
-        during = observer.ingest_status(job_id)
-        assert during["status"] == "error" and "임베딩 75/100" in during["error"]
-    finally:
-        other_writer._release_mutation(token)
-    assert observer.ingest_status(job_id)["status"] == "error"
-
-
-def test_owner_check_failure_reports_unknown_instead_of_raising(tmp_path, monkeypatch):
-    path = tmp_path / "last.json"
-    job = JobStore(path).create("d1")
-
-    def cannot_tell(_pid):
-        raise OSError(5, "Access is denied")
-
-    monkeypatch.setattr(jobs_mod, "process_start_token", cannot_tell)
-    restored = JobStore(path).get(job.job_id)
-
-    assert restored.status == "running"
-    assert "확인 불가" in restored.owner_check
-    assert "확인 불가" in restored.to_dict()["message"]
-
-
-def test_finish_between_read_and_verdict_returns_done(tmp_path):
-    """조회자가 running을 읽은 직후 소유자가 done을 저장하고 끝나면, 실패가 아니라 done을 돌려준다."""
-    path = tmp_path / "last.json"
-    owner = JobStore(path)
-    job = owner.create("d1")
-
-    def owner_finishes_then_exits(_pid, _token):
-        owner.finish(job.job_id, {"num_chunks": 7})
-        return OWNER_DEAD
-
-    restored = JobStore(path, owner_state=owner_finishes_then_exits).get(job.job_id)
-
-    assert restored.status == "done"
-    assert restored.result == {"num_chunks": 7}
-
-
-def test_owner_identity_distinguishes_reused_pid(tmp_path):
-    import os
-
-    me = os.getpid()
-    assert default_owner_state(me, jobs_mod._self_token()) == OWNER_ALIVE
-    assert default_owner_state(me, "다른 프로세스의 생성 시각") == OWNER_DEAD
-    assert default_owner_state(None, None) == OWNER_DEAD
-
-    finished = subprocess.Popen([sys.executable, "-c", "pass"])
-    finished.wait(timeout=30)
-    assert default_owner_state(finished.pid, "아무거나") == OWNER_DEAD
 
 
 def test_thread_start_failure_records_job_error(tmp_path, fake_backend, monkeypatch):

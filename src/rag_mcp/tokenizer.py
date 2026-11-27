@@ -50,10 +50,17 @@ def _kiwi_tokens(text: str) -> list[str]:
 
 
 def tokenize(text: str) -> list[str]:
-    """텍스트 → 토큰 리스트. 코드/금액/비율은 한 토큰으로 보존, 나머지는 Kiwi 형태소."""
-    if not text:
-        return []
+    """텍스트 → 토큰 리스트. 코드/금액/비율은 한 토큰으로 보존, 나머지는 Kiwi 형태소.
 
+    같은 본문을 lexical 리랭커와 matched_by(sparse 판정)가 연달아 분석하므로 최근 결과를
+    캐시해 재사용한다. 호출자가 고쳐 써도 캐시가 오염되지 않도록 매번 새 리스트를 돌려준다.
+    """
+    return list(_tokenize_cached(text)) if text else []
+
+
+# ponytail: 전역 LRU(본문 수 기준), 메모리가 문제되면 maxsize를 줄이거나 검색 호출 단위로 좁힐 것
+@lru_cache(maxsize=256)
+def _tokenize_cached(text: str) -> tuple[str, ...]:
     matched = [False] * len(text)
     protected: list[tuple[int, int, str]] = []
     for pat in _PROTECT_PATTERNS:
@@ -78,4 +85,4 @@ def tokenize(text: str) -> list[str]:
         cursor = e
     if cursor < len(text):
         tokens.extend(_kiwi_tokens(text[cursor:]))
-    return tokens
+    return tuple(tokens)

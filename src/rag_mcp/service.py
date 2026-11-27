@@ -109,7 +109,7 @@ class RagService:
         # 비동기 job 추적과 같은 데이터 폴더의 MCP/CLI 전체 쓰기 1개 제한.
         self._submit_lock = threading.Lock()
         self._mutations = MutationGuard(self.config.data_dir)
-        # 마지막 job 1건은 디스크에 남는다. 다른 인스턴스의 job은 소유 프로세스 생존으로 판정한다.
+        # 마지막 job 1건은 디스크에 남는다. 다른 인스턴스의 running job은 단정 없이 마지막 기록을 안내한다.
         self.jobs = JobStore(self.config.data_dir / "jobs" / "last_ingest_job.json")
         # retriever/indexer 캐시 빌드 보호. 백그라운드 ingest 스레드와 메인 검색 스레드가
         # 같은 모델의 VectorStore(Qdrant local client)를 동시에 두 개 열어 파일락이 충돌하는 것을 막는다.

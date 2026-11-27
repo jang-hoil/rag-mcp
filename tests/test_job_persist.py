@@ -1,10 +1,5 @@
 """마지막 색인 job 1건이 재시작(새 JobStore) 후에도 ingest_status로 조회되는지 (리포트 #14)."""
-from rag_mcp.jobs import OWNER_DEAD, JobStore
-
-
-def _dead_owner(_pid, _token):
-    """같은 프로세스 안에서 '소유 프로세스가 죽은 뒤 재시작'을 흉내 낸다."""
-    return OWNER_DEAD
+from rag_mcp.jobs import JobStore
 
 
 def test_finished_job_survives_restart(tmp_path):
@@ -21,14 +16,16 @@ def test_finished_job_survives_restart(tmp_path):
     assert "12청크" in restored.to_dict()["message"]
 
 
-def test_running_job_reports_interrupted_after_restart(tmp_path):
+def test_running_job_after_restart_is_not_judged(tmp_path):
+    """메모리에 없는 running job은 실패로 단정하지 않고 안내만 붙인다."""
     path = tmp_path / "last.json"
     job = JobStore(path).create(document_id="d1")
 
-    restored = JobStore(path, owner_state=_dead_owner).get(job.job_id)
+    restored = JobStore(path).get(job.job_id)
 
-    assert restored.status == "error"
-    assert "중단" in restored.error
+    assert restored.status == "running" and restored.error is None
+    assert "중단됐거나 다른 클라이언트에서 진행 중" in restored.note
+    assert restored.note in restored.to_dict()["message"]
 
 
 def test_only_last_job_is_kept(tmp_path):
@@ -68,8 +65,8 @@ def test_service_ingest_status_reads_persisted_job(tmp_path, fake_backend):
     assert (tmp_path / "jobs" / "last_ingest_job.json").exists()
 
 
-def test_interrupted_job_keeps_last_progress_and_elapsed(tmp_path, monkeypatch):
-    """진행 콜백의 단계 전환이 디스크에 남아, 중단 판정 시 마지막 진척·관측 시각을 쓴다."""
+def test_restored_job_keeps_last_progress_and_elapsed(tmp_path, monkeypatch):
+    """진행 콜백의 단계 전환이 디스크에 남아, 재시작 후 마지막 진척·갱신 시각을 보여준다."""
     from rag_mcp import jobs as jobs_mod
 
     clock = [1000.0]
@@ -81,12 +78,13 @@ def test_interrupted_job_keeps_last_progress_and_elapsed(tmp_path, monkeypatch):
     store.progress(job.job_id, jobs_mod.STAGE_EMBEDDING, 75, 100)  # 단계 전환 → 즉시 기록
     clock[0] = 5000.0  # 한참 뒤 재시작
 
-    restored = JobStore(path, owner_state=_dead_owner).get(job.job_id)
+    restored = JobStore(path).get(job.job_id)
 
-    assert restored.status == "error"
+    assert restored.status == "running" and restored.stage == jobs_mod.STAGE_EMBEDDING
     assert (restored.processed, restored.total) == (75, 100)
-    assert "임베딩 75/100" in restored.error
-    assert restored.elapsed_seconds() == 90.0  # 마지막 관측까지, 재시작 시각 아님
+    assert "마지막 갱신 65분 10초 전" in restored.note  # 5000 - 1090
+    assert restored.elapsed_seconds() == 90.0  # 마지막 갱신까지, 재시작 시각 아님
+    assert "임베딩 진행 중 75/100" in restored.to_dict()["message"]
 
 
 def test_progress_within_same_stage_is_throttled(tmp_path, monkeypatch):
