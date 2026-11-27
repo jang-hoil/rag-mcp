@@ -12,10 +12,10 @@
 
 ## Global Constraints
 
-- 원본 프로젝트 D:/User/Desktop/rag mcp의 코드·설정·Git 이력·미커밋 파일·운영 문서를 변경하지 않는다.
+- 원본 프로젝트 <프로젝트 경로>의 코드·설정·Git 이력·미커밋 파일·운영 문서를 변경하지 않는다.
 - 원본 GitHub jang-hoil/rag-mcp에 commit/push/설정 변경을 하지 않는다.
 - 기존 Qdrant 서버와 모델은 재사용하지만 원래 rag_ 컬렉션에는 쓰기·삭제·스키마 변경을 하지 않는다.
-- 새 프로젝트 경로는 D:/User/Desktop/graph-rag-mcp, 배포·CLI·MCP 이름은 graph-rag-mcp, 개발 브랜치는 codex/llamaindex-graph-rag로 한다.
+- 새 프로젝트 경로는 <새 프로젝트 경로>, 배포·CLI·MCP 이름은 graph-rag-mcp, 개발 브랜치는 codex/llamaindex-graph-rag로 한다.
 - 영구 자료는 새 프로젝트 data/, 임시 로그·스크립트는 work/로 분리한다.
 - 표 셀은 JSON에서 추출하고 표 청크를 임의 분할하지 않는다. 이미지 서식은 제목만 보고 내용을 생성하지 않는다.
 - 한국어 토큰화는 Kiwi, 코드·금액 토큰은 보존한다. BM25 별도 pkl은 만들지 않는다.
@@ -50,9 +50,9 @@
 실행 시 사용할 독립 복제 명령은 다음과 같다. 기존 Git 저장소와 .git을 공유하는 worktree만으로 분리를 완료했다고 보지 않는다. 목표 폴더가 이미 존재하면 덮어쓰지 않고 내용과 remote를 확인해 재사용 가능한지 먼저 판단한다.
 
 ```powershell
-git clone --no-hardlinks --no-checkout --origin source-base 'D:\User\Desktop\rag mcp' 'D:\User\Desktop\graph-rag-mcp'
-git -C 'D:\User\Desktop\graph-rag-mcp' switch -c codex/llamaindex-graph-rag 6d2bf61
-git -C 'D:\User\Desktop\graph-rag-mcp' remote set-url --push source-base DISABLED
+git clone --no-hardlinks --no-checkout --origin source-base '<프로젝트 경로>' '<새 프로젝트 경로>'
+git -C '<새 프로젝트 경로>' switch -c codex/llamaindex-graph-rag 6d2bf61
+git -C '<새 프로젝트 경로>' remote set-url --push source-base DISABLED
 ```
 
 새 GitHub 저장소 이름은 graph-rag-mcp, 초기 가시성은 private를 기본 제안으로 한다. 실제 생성은 구현 단계에서 진행한다. origin은 새 저장소만 가리키며 원래 저장소에는 push하지 않는다. 프로젝트 실행·Codex 연결은 새 checkout을 사용한다.
@@ -108,8 +108,8 @@ packages = ["src/rag_mcp", "src/graph_rag_mcp"]
 ### 3.1 데이터 위치
 
 ```text
-D:/User/Desktop/rag mcp/                 원본: 운영 그대로 유지
-D:/User/Desktop/graph-rag-mcp/           신규 독립 저장소
+<프로젝트 경로>/                 원본: 운영 그대로 유지
+<새 프로젝트 경로>/           신규 독립 저장소
   src/rag_mcp/                          기존 기반 코드
   src/graph_rag_mcp/                    새 그래프 기능
   data/
@@ -134,11 +134,11 @@ Qdrant 프로세스는 기존 것을 사용한다. 기존 컬렉션은 rag_, 새
 새 GraphSettings는 아래 변수를 읽어 Config의 data_dir/qdrant_mode/qdrant_url/embedding_model/collection_prefix를 명시적으로 구성한다. 현재 RAG_DATA_DIR 같은 전역 설정이 새 프로젝트 경로를 덮어쓰지 못하게 한다.
 
 ```dotenv
-GRAPH_RAG_DATA_DIR=D:/User/Desktop/graph-rag-mcp/data
+GRAPH_RAG_DATA_DIR=<새 프로젝트 경로>/data
 GRAPH_RAG_QDRANT_URL=http://127.0.0.1:6333
 GRAPH_RAG_COLLECTION_PREFIX=grag
 GRAPH_RAG_EMBEDDING_MODEL=kure
-GRAPH_RAG_SOURCE_DATA_DIR=D:/User/Desktop/rag mcp/data
+GRAPH_RAG_SOURCE_DATA_DIR=<프로젝트 경로>/data
 GRAPH_RAG_SOURCE_QDRANT_URL=http://127.0.0.1:6333
 GRAPH_RAG_EXTRACTOR=explicit
 GRAPH_RAG_MAX_HOPS=1
@@ -167,7 +167,7 @@ live 원본 컬렉션을 새 앱의 변경 대상으로 연결하지 않는다. 
 
 ## 4. 첫 문서와 그래프 계약
 
-첫 후보는 2025년+공중보건의사제도+운영지침이다. 현재 목록상 224청크이고 본문·서식 목차를 함께 활용할 수 있다. 첫 가져오기에서 실제 수량과 내용 해시를 다시 확인한다. 두 번째 호환성 확인에는 작은 IBMS 가이드를 사용한다. 수록 법령의 현행성 판단을 개발 테스트의 결과로 표현하지 않는다.
+첫 후보는 문서 F이다. 현재 목록상 224청크이고 본문·서식 목차를 함께 활용할 수 있다. 첫 가져오기에서 실제 수량과 내용 해시를 다시 확인한다. 두 번째 호환성 확인에는 작은 시스템 가이드를 사용한다. 수록 법령의 현행성 판단을 개발 테스트의 결과로 표현하지 않는다.
 
 ### 4.1 그래프 자료
 
@@ -331,7 +331,7 @@ search_graph_documents의 기본 탐색 관계는 REFERS_TO/HAS_TABLE/HAS_FORM/N
 
 ## 8. 신규 파일의 책임
 
-아래 모든 경로는 만들 예정인 D:/User/Desktop/graph-rag-mcp를 기준으로 한다. 실제 구현은 이 새 checkout에서만 한다.
+아래 모든 경로는 만들 예정인 <새 프로젝트 경로>를 기준으로 한다. 실제 구현은 이 새 checkout에서만 한다.
 
 | 파일 | 책임 |
 |---|---|
@@ -529,7 +529,7 @@ Files: README.md, docs/operations.md, docs/import-existing.md, docs/restore.md, 
 다음 명령은 구현을 요청받은 뒤 새 checkout에서 실행한다. 각 모듈의 테스트 파일이 만들어진 작업 시점에 해당 명령을 사용한다.
 
 ```powershell
-Set-Location -LiteralPath 'D:\User\Desktop\graph-rag-mcp'
+Set-Location -LiteralPath '<새 프로젝트 경로>'
 $env:UV_CACHE_DIR = Join-Path (Get-Location) 'work\uv-cache'
 uv python pin 3.11
 uv sync --extra dev

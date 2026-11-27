@@ -10,6 +10,9 @@
 """
 from __future__ import annotations
 
+import os
+import threading
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 
@@ -29,6 +32,95 @@ mcp = MCPServer("rag-mcp", log_level="WARNING")
 _service: RagService | None = None
 
 
+def rotate_log_if_needed(path: Path, max_bytes: int, backups: int) -> bool:
+    """기동 시 로그가 max_bytes 이상이면 server.log → .1 → .2 … 로 밀어낸다(가장 오래된 것 삭제).
+
+    회전을 기동 시에만 하는 이유: MCP 서버는 클라이언트 재시작마다 새로 뜨고 평상시
+    WARNING 레벨이라 실행 중 증가는 미미하다. 또 여러 인스턴스(Codex·Claude)가 같은 파일에
+    이어 쓰므로 실행 중 회전은 Windows에서 실패한다. 이름 변경이 막히면(다른 인스턴스가
+    열고 있음) 이번 회전만 건너뛰고 False — 서버 기동을 막지 않는다.
+
+    순서가 중요하다: 활성 로그를 먼저 임시 이름으로 옮겨 본 뒤(=회전 가능 확인) 성공했을 때만
+    백업을 민다. 활성 로그가 막혀 있으면 기존 백업은 하나도 건드리지 않는다.
+    """
+    if max_bytes <= 0:
+        return False
+    try:
+        if path.stat().st_size < max_bytes:
+            return False
+    except FileNotFoundError:
+        return False
+    staged = path.with_name(f"{path.name}.rotating")
+    try:
+        os.replace(path, staged)
+    except OSError:
+        return False  # 다른 인스턴스가 열고 있음 — 백업은 그대로 둔다
+    try:
+        path.with_name(f"{path.name}.{backups}").unlink(missing_ok=True)
+        for index in range(backups - 1, 0, -1):
+            older = path.with_name(f"{path.name}.{index}")
+            if older.exists():
+                os.replace(older, path.with_name(f"{path.name}.{index + 1}"))
+        os.replace(staged, path.with_name(f"{path.name}.1"))
+    except OSError:
+        # 백업 밀기 중 실패: 옮겨 둔 활성 로그를 잃지 않도록 비어 있는 .1 또는 원래 자리로 되돌린다.
+        for target in (path.with_name(f"{path.name}.1"), path):
+            try:
+                if not target.exists():
+                    os.replace(staged, target)
+                    break
+            except OSError:
+                continue
+        return False
+    return True
+
+
+class TimestampedLogStream:
+    """줄 머리마다 `[YYYY-MM-DD HH:MM:SS] `를 붙여 원본 스트림에 쓴다.
+
+    print는 본문과 줄바꿈을 따로 write하므로 줄 시작 여부를 상태로 기억한다.
+    write/flush 외 속성(close·fileno·encoding 등)은 원본 스트림에 위임한다.
+
+    파일 쓰기 실패(OSError — 디스크 가득 참, 다른 인스턴스와의 충돌 등)는 삼킨다. 로그 한 줄을
+    잃는 편이 도구 호출 전체가 예외로 죽는 것보다 낫고, 실패를 다시 stderr(=자기 자신)로
+    보고하면 재귀하므로 어디에도 다시 쓰지 않는다. 로그 회전은 기동 시에만 하므로(실행 중
+    회전 없음) 같은 파일을 여러 프로세스가 열어도 회전 경합이 생기지 않는다.
+    """
+
+    def __init__(self, stream) -> None:
+        self._stream = stream
+        self._at_line_start = True
+        self._lock = threading.Lock()
+
+    def write(self, text: str) -> int:
+        if not text:
+            return 0
+        with self._lock:
+            parts: list[str] = []
+            at_line_start = self._at_line_start
+            for piece in text.splitlines(keepends=True):
+                if at_line_start:
+                    parts.append(datetime.now().strftime("[%Y-%m-%d %H:%M:%S] "))
+                parts.append(piece)
+                at_line_start = piece.endswith(("\n", "\r"))
+            try:
+                self._stream.write("".join(parts))
+            except (OSError, ValueError):  # ValueError: 이미 닫힌 파일
+                # 기록 실패 시 줄 시작 상태를 바꾸지 않는다 — 다음 조각에도 시각이 붙는다.
+                return len(text)
+            self._at_line_start = at_line_start
+        return len(text)
+
+    def flush(self) -> None:
+        try:
+            self._stream.flush()
+        except (OSError, ValueError):
+            pass
+
+    def __getattr__(self, name: str):
+        return getattr(self._stream, name)
+
+
 def redirect_logs_to_file(config) -> Path | None:
     """서버 로그를 stderr 대신 파일로 보낸다(파이프 블로킹 원천 차단).
 
@@ -36,6 +128,7 @@ def redirect_logs_to_file(config) -> Path | None:
     4KB는 금방 찬다. mcp.run() 직전에 호출해 stderr 파이프를 아예 쓰지 않게 만든다.
     기동 검사(preflight) 실패는 이 전환 **이전**에 나므로 클라이언트가 그대로 볼 수 있다.
 
+    기동 시 크기 기반 회전(RAG_LOG_MAX_BYTES·RAG_LOG_BACKUPS)과 줄마다 시각 표시를 한다.
     실패해도 서버는 계속 뜬다(로그 위치보다 서비스 가동이 우선) — 이때 None을 반환하고
     stderr를 건드리지 않는다.
     """
@@ -45,10 +138,12 @@ def redirect_logs_to_file(config) -> Path | None:
         log_dir = config.data_dir / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         path = log_dir / "server.log"
+        rotate_log_if_needed(path, config.log_max_bytes, config.log_backups)
         stream = path.open("a", encoding="utf-8", buffering=1)
     except OSError:
         return None
-    sys.stderr = stream
+    sys.stderr = TimestampedLogStream(stream)
+    print(f"[rag-mcp] 서버 기동 pid={os.getpid()}", file=sys.stderr, flush=True)
     return path
 
 
@@ -70,7 +165,8 @@ async def search_documents(
     search_mode: str = "hybrid", embedding_model: str | None = None,
     fusion: str = "rrf", fiscal_year: int | None = None, filters: dict[str, JsonValue] | None = None,
 ) -> list[dict]:
-    """특정 회계·예산 지침서의 하이브리드 검색. document_id는 필수.
+    """색인된 업무 지침서·편람 1건의 하이브리드 검색. document_id는 필수(list_documents로 확인).
+    문서 분야는 회계·예산뿐 아니라 민방위·징계·감사·공중보건의 등 다양하다.
     fiscal_year로 해당 연도만 검색. 결과가 needs_image면 page_image 경로 포함."""
     return await _run(
         service().search_documents, query, document_id=document_id, top_k=top_k, search_mode=search_mode,
@@ -113,9 +209,15 @@ async def ingest_status(job_id: str) -> dict:
 
 
 @mcp.tool()
-async def get_chunk(chunk_id: str, embedding_model: str | None = None) -> dict:
-    """chunk_id로 단건 조회."""
-    return await _run(service().get_chunk, chunk_id, embedding_model=embedding_model)
+async def get_chunk(
+    chunk_id: str, embedding_model: str | None = None, neighbors: int = 0,
+) -> dict:
+    """chunk_id로 단건 조회. neighbors=N(0~5)이면 같은 문서의 앞뒤 N개 청크를
+    읽기 순서대로 before/after에 함께 돌려준다 — 조항·표가 청크 경계에서 잘렸을 때
+    문맥을 보완하는 용도(재색인 불필요)."""
+    return await _run(
+        service().get_chunk, chunk_id, embedding_model=embedding_model, neighbors=neighbors,
+    )
 
 
 @mcp.tool()
@@ -127,7 +229,8 @@ async def get_page_image(
     """문서의 원본 페이지를 실제 이미지 콘텐츠로 반환한다.
 
     pages는 단일 페이지 번호 또는 최대 5쪽의 목록이다. 캐시 PNG를 먼저 사용하고,
-    빠진 페이지만 manifest의 원본 PDF에서 렌더한다. dpi 미지정 시 화면 확인용 144dpi를 쓴다.
+    빠진 페이지만 manifest의 원본 PDF에서 렌더한다. dpi 미지정 시 설정값
+    RAG_PAGE_IMAGE_DPI(기본 200dpi)를 쓴다.
     """
     page_images = await _run(
         service().get_page_image,

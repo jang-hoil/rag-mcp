@@ -34,7 +34,7 @@ def filename_pipeline(tmp_path, monkeypatch):
     return config, calls
 
 
-@pytest.mark.parametrize("filename", ["징계업무편람 (3).pdf", "manual.v2 (1).PDF"])
+@pytest.mark.parametrize("filename", ["업무편람 (3).pdf", "manual.v2 (1).PDF"])
 def test_pipeline_prefers_pdf_filename_over_internal_title(filename_pipeline, tmp_path, filename):
     config, _ = filename_pipeline
     path = tmp_path / filename

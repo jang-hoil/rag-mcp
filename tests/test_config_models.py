@@ -10,8 +10,8 @@ from rag_mcp.models import Chunk, Manifest, SearchResult, SearchSource
 def test_collection_by_model():
     cfg = Config()
     assert (
-        cfg.collection_name("kure", "2026 공직윤리 실무과정")
-        == "rag_kure_2026_공직윤리_실무과정_4b9257"
+        cfg.collection_name("kure", "2026 윤리 실무 교재")
+        == "rag_kure_2026_윤리_실무_교재_1f08a7"
     )
     assert (
         cfg.collection_name("bge_m3", "2026 예산지침(최종)")

@@ -5,7 +5,7 @@
 ```
 나:     재산등록 의무자 범위 알려줘
 
-Claude: 2026년 공직윤리 실무과정 351쪽에 이렇게 나와 있습니다.
+Claude: 문서 A 351쪽에 이렇게 나와 있습니다.
         "..."
         (목차 위치: 7. 퇴직공직자 행위제한제도 > 재산등록 > 제2장 신고서관리)
 ```
@@ -215,7 +215,7 @@ Invoke-RestMethod 'http://127.0.0.1:6333/healthz'
 
 ```powershell
 uv run python scripts/migrate_local_to_server.py `
-  --source-path 'D:\User\Desktop\rag mcp\data\qdrant' `
+  --source-path '<프로젝트 경로>\data\qdrant' `
   --server-storage-path 'D:\qdrant\storage' `
   --target-url 'http://127.0.0.1:6333'
 ```
@@ -224,7 +224,7 @@ uv run python scripts/migrate_local_to_server.py `
 
 ```powershell
 uv run python scripts/migrate_local_to_server.py `
-  --source-path 'D:\User\Desktop\rag mcp\data\qdrant' `
+  --source-path '<프로젝트 경로>\data\qdrant' `
   --server-storage-path 'D:\qdrant\storage' `
   --target-url 'http://127.0.0.1:6333' `
   --apply
@@ -291,13 +291,13 @@ Stop-ScheduledTask -TaskName 'rag-mcp-qdrant'
 ### 색인하기
 
 ```
-pdf 폴더의 2026년 공직윤리 실무과정.pdf 를 색인해줘
+pdf 폴더의 문서 A.pdf 를 색인해줘
 ```
 
 큰 PDF는 시간이 걸립니다. 색인을 시작하면 **쪽수와 대략적인 예상 소요시간**을 함께 알려줍니다.
 
 ```
-'2026년 공직윤리 실무과정' 색인을 시작했습니다(340쪽, 대략 17분 예상).
+'문서 A' 색인을 시작했습니다(340쪽, 대략 17분 예상).
 파싱 → 임베딩 → 저장 순으로 진행됩니다.
 ```
 
@@ -316,7 +316,7 @@ pdf 폴더의 2026년 공직윤리 실무과정.pdf 를 색인해줘
 문서를 지정해 물어봅니다.
 
 ```
-2026년 공직윤리 실무과정에서 재산등록 의무자 범위를 찾아줘
+문서 A에서 재산등록 의무자 범위를 찾아줘
 ```
 
 문서 이름이 기억나지 않으면:
@@ -341,7 +341,7 @@ pdf 폴더의 2026년 공직윤리 실무과정.pdf 를 색인해줘
 이미지만 못 엽니다. 이때는 재색인(수십 분) 대신 경로만 고치면 됩니다.
 
 ```
-그 문서 원본 경로를 D:\User\Downloads\2026년 공직윤리 실무과정.pdf 로 바꿔줘
+그 문서 원본 경로를 <원본 경로>\문서 A.pdf 로 바꿔줘
 ```
 
 쪽수가 색인 당시와 다르면 다른 문서일 수 있어 거부합니다. 같은 문서가 맞으면 `force=True`로
@@ -399,7 +399,7 @@ PDF ─► 문단·표 단위로 잘라 저장 ─► 질문 ─► 비슷한 �
 
 더 자세한 내용:
 
-- [운영가이드.md](운영가이드.md) — 환경 변수, 운영 주의사항, 전체 구조, 도구 10개 상세
+- [운영가이드.md](운영가이드.md) — 환경 변수, 운영 주의사항, 전체 구조, 도구 11개 상세
 - [MCP_연동가이드.md](MCP_연동가이드.md) — 연동 상세와 문제 해결
 
 ---

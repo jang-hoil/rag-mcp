@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import re
 import threading
 
 from qdrant_client.models import ScoredPoint
@@ -33,6 +34,29 @@ class SearchOutcome:
     notices: tuple[str, ...] = ()
 
 
+_CHUNK_SEQ = re.compile(r"^(?P<doc>.+)::c(?P<seq>\d+)$")
+
+
+def has_chunk_sequence(chunk_id: str) -> bool:
+    """chunk_id가 `문서ID::c순번` 형식인지(앞뒤 청크 계산 가능 여부)."""
+    return _CHUNK_SEQ.match(chunk_id) is not None
+
+
+def neighbor_chunk_ids(chunk_id: str, n: int) -> tuple[list[str], list[str]]:
+    """`문서ID::c순번`에서 앞뒤 n개의 chunk_id를 읽기 순서대로 계산한다.
+
+    청커가 표·본문 공통 연번으로 chunk_id를 매기므로(chunking.build_chunks) 순번이 곧
+    문서 내 읽기 순서다. 별도 순번 필드·재색인이 필요 없다. 형식이 다르면 ([], []).
+    """
+    match = _CHUNK_SEQ.match(chunk_id)
+    if match is None or n <= 0:
+        return [], []
+    doc, seq = match.group("doc"), int(match.group("seq"))
+    before = [f"{doc}::c{i}" for i in range(max(0, seq - n), seq)]
+    after = [f"{doc}::c{i}" for i in range(seq + 1, seq + n + 1)]
+    return before, after
+
+
 def _source_from_payload(payload: dict) -> SearchSource:
     """Qdrant payload → SearchSource (스펙 §5 스키마). needs_image일 때만 page_image 노출."""
     return SearchSource(
@@ -49,6 +73,20 @@ def _source_from_payload(payload: dict) -> SearchSource:
         page_image=payload.get("page_image") if payload.get("needs_image") else None,
         meta=payload.get("meta") or {},
     )
+
+
+def _matched_by(text: str, search_mode: str, q_sparse_idx: set[int]) -> list[str]:
+    matched_by: list[str] = []
+    if search_mode in ("dense", "hybrid"):
+        # dense는 근사 표기: dense 신호가 동작한 검색이면 항상 포함(개별 청크 기여도는 미산정).
+        # sparse는 아래에서 질의·문서 토큰 겹침을 실제로 확인한다.
+        matched_by.append("dense")
+    if search_mode in ("sparse", "hybrid"):
+        # 질의 sparse 토큰이 청크 텍스트와 겹치면 sparse 기여로 표기
+        doc_idx, _ = to_sparse_query(text)
+        if q_sparse_idx & set(doc_idx):
+            matched_by.append("sparse")
+    return matched_by
 
 
 class Retriever:
@@ -74,7 +112,7 @@ class Retriever:
     @property
     def backend(self) -> EmbeddingBackend:
         if self._backend is None:
-            self._backend = get_backend(self.embedding_model)
+            self._backend = get_backend(self.embedding_model, self.config.embedding_device)
         return self._backend
 
     def _current_reranker_key(self) -> tuple:
@@ -156,6 +194,8 @@ class Retriever:
         points = self.store.query(
             dense_vec, sparse_vec, top_k=candidate_k, search_mode=search_mode,
             fusion=fusion, fiscal_year=fiscal_year, filters=filters,
+            dense_candidates=self.config.hybrid_dense_candidates,
+            sparse_candidates=self.config.hybrid_sparse_candidates,
         )
         candidates_before_filter = len(points)
         min_dense_score = self.config.min_dense_score
@@ -210,11 +250,12 @@ class Retriever:
                 continue
             kept.append(point)
 
-        converted = [
-            self._to_result(point, search_mode, q_sparse_idx)
-            for point in kept
-        ]
+        converted = [self._to_result(point) for point in kept]
         reranked = self.reranker.rerank(query, converted)[:top_k]
+        # matched_by의 sparse 판정은 청크 텍스트를 다시 형태소 분석한다 → 리랭크 후보 전체가 아니라
+        # 최종 top_k에만 계산한다(리랭커가 matched_by를 쓰지 않으므로 결과 동일).
+        for result in reranked:
+            result.matched_by = _matched_by(result.text, search_mode, q_sparse_idx)
         return SearchOutcome(
             results=reranked,
             candidates_before_filter=candidates_before_filter,
@@ -223,25 +264,13 @@ class Retriever:
             notices=notices,
         )
 
-    def _to_result(self, p: ScoredPoint, search_mode: str, q_sparse_idx: set[int]) -> SearchResult:
+    def _to_result(self, p: ScoredPoint) -> SearchResult:
         payload = p.payload or {}
-        matched_by: list[str] = []
-        if search_mode in ("dense", "hybrid"):
-            # dense는 근사 표기: dense 신호가 동작한 검색이면 항상 포함(개별 청크 기여도는 미산정).
-            # sparse는 아래에서 질의·문서 토큰 겹침을 실제로 확인한다.
-            matched_by.append("dense")
-        if search_mode in ("sparse", "hybrid"):
-            # 질의 sparse 토큰이 청크 텍스트와 겹치면 sparse 기여로 표기
-            doc_idx, _ = to_sparse_query(payload.get("text", ""))
-            if q_sparse_idx & set(doc_idx):
-                matched_by.append("sparse")
-
         return SearchResult(
             chunk_id=payload.get("chunk_id", str(p.id)),
             text=payload.get("text", ""),
             score=float(p.score),
             fusion_score=float(p.score),
-            matched_by=matched_by,
             source=_source_from_payload(payload),
         )
 
@@ -254,4 +283,24 @@ class Retriever:
         return SearchResult(
             chunk_id=chunk_id, text=payload.get("text", ""), score=1.0,
             matched_by=[], source=_source_from_payload(payload),
+        )
+
+    def get_neighbors(self, chunk_id: str, n: int) -> tuple[list[dict], list[dict]]:
+        """앞뒤 n개 청크를 읽기 순서로 반환한다(없는 순번은 건너뜀). 조회는 1회."""
+        before_ids, after_ids = neighbor_chunk_ids(chunk_id, n)
+        if not before_ids and not after_ids:
+            return [], []
+        found: dict[str, dict] = {}
+        for rec in self.store.retrieve_chunks(before_ids + after_ids):
+            payload = rec.payload or {}
+            cid = payload.get("chunk_id")
+            if cid:
+                found[cid] = {
+                    "chunk_id": cid,
+                    "text": payload.get("text", ""),
+                    "source": _source_from_payload(payload).model_dump(),
+                }
+        return (
+            [found[c] for c in before_ids if c in found],
+            [found[c] for c in after_ids if c in found],
         )

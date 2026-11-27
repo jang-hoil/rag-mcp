@@ -145,6 +145,22 @@ class Config:
     chunk_boundary_window: int = field(
         default_factory=lambda: int(_env("RAG_CHUNK_BOUNDARY_WINDOW", "160"))
     )
+    # 서버 로그(data/logs/server.log) 크기 제한. 기동 시 이 크기 이상이면 server.log.1로 회전.
+    # 0이면 회전하지 않는다. 보관 개수는 server.log.1 ~ server.log.N.
+    log_max_bytes: int = field(
+        default_factory=lambda: int(_env("RAG_LOG_MAX_BYTES", "5000000"))
+    )
+    log_backups: int = field(default_factory=lambda: int(_env("RAG_LOG_BACKUPS", "3")))
+    # --- 아래는 나중에 추가된 필드: 기존 위치 인자 순서를 깨지 않도록 항상 맨 뒤에 둔다. ---
+    # 임베딩 연산 장치(SentenceTransformer device). GPU가 있으면 "cuda" 등으로 바꾼다.
+    embedding_device: str = field(default_factory=lambda: _env("RAG_EMBEDDING_DEVICE", "cpu"))
+    # 하이브리드 검색에서 융합 전에 가져올 후보 수(의미 dense / 키워드 sparse). top_k가 더 크면 top_k.
+    hybrid_dense_candidates: int = field(
+        default_factory=lambda: int(_env("RAG_HYBRID_DENSE_CANDIDATES", "20"))
+    )
+    hybrid_sparse_candidates: int = field(
+        default_factory=lambda: int(_env("RAG_HYBRID_SPARSE_CANDIDATES", "30"))
+    )
 
     def __post_init__(self) -> None:
         if self.qdrant_mode not in {"local", "server"}:
@@ -154,6 +170,12 @@ class Config:
                 f"알 수 없는 임베딩 모델: {self.embedding_model} "
                 f"(가능: {list(COLLECTION_BY_MODEL)})"
             )
+        if not self.embedding_device.strip():
+            raise ValueError("embedding_device는 비어 있을 수 없습니다")
+        if not 1 <= self.hybrid_dense_candidates <= 1000:
+            raise ValueError("hybrid_dense_candidates는 1 이상 1000 이하여야 합니다")
+        if not 1 <= self.hybrid_sparse_candidates <= 1000:
+            raise ValueError("hybrid_sparse_candidates는 1 이상 1000 이하여야 합니다")
         if not 72 <= self.page_image_dpi <= 300:
             raise ValueError("page_image_dpi는 72 이상 300 이하여야 합니다")
         if not 320 <= self.page_image_max_width <= 4096:
@@ -182,6 +204,10 @@ class Config:
             raise ValueError("리랭커 가중치는 0 이상이어야 합니다")
         if not 0 <= self.chunk_boundary_window <= 800:
             raise ValueError("chunk_boundary_window는 0 이상 800 이하여야 합니다")
+        if self.log_max_bytes < 0:
+            raise ValueError("log_max_bytes는 0 이상이어야 합니다(0=회전 안 함)")
+        if not 1 <= self.log_backups <= 20:
+            raise ValueError("log_backups는 1 이상 20 이하여야 합니다")
 
     # 파생 경로
     @property

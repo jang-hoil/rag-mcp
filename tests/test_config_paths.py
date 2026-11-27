@@ -8,7 +8,6 @@ PermissionError로 서버가 즉사했다. 쓰기 가능한 엉뚱한 폴더였�
 규칙: RAG_DATA_DIR가 있으면 그것, 없으면 **프로젝트 루트**(pyproject.toml이 있는 폴더)의
 data. 프로젝트 루트를 못 찾으면(패키지만 설치된 경우) 예전처럼 cwd 기준으로 물러선다.
 """
-import os
 from pathlib import Path
 
 import pytest
@@ -77,3 +76,34 @@ def test_falls_back_to_cwd_when_project_root_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(config_mod, "find_project_root", lambda start=None: None)
 
     assert Config().data_dir == (tmp_path / "data").resolve()
+
+
+def test_search_tuning_env_defaults_and_overrides(monkeypatch):
+    """임베딩 장치·하이브리드 후보 수: 기본값은 기존 하드코딩(cpu, 20, 30)과 같고 환경변수로 바뀐다."""
+    from rag_mcp.config import Config
+
+    for name in ("RAG_EMBEDDING_DEVICE", "RAG_HYBRID_DENSE_CANDIDATES", "RAG_HYBRID_SPARSE_CANDIDATES"):
+        monkeypatch.delenv(name, raising=False)
+    cfg = Config()
+    assert (cfg.embedding_device, cfg.hybrid_dense_candidates, cfg.hybrid_sparse_candidates) == ("cpu", 20, 30)
+
+    monkeypatch.setenv("RAG_EMBEDDING_DEVICE", "cuda")
+    monkeypatch.setenv("RAG_HYBRID_DENSE_CANDIDATES", "40")
+    monkeypatch.setenv("RAG_HYBRID_SPARSE_CANDIDATES", "50")
+    cfg = Config()
+    assert (cfg.embedding_device, cfg.hybrid_dense_candidates, cfg.hybrid_sparse_candidates) == ("cuda", 40, 50)
+
+    monkeypatch.setenv("RAG_HYBRID_DENSE_CANDIDATES", "0")
+    with pytest.raises(ValueError):
+        Config()
+
+
+def test_new_config_fields_do_not_shift_positional_order():
+    """나중에 추가한 필드는 맨 뒤에 있어야 기존 위치 인자 호출(예: 6번째=render_dpi)이 깨지지 않는다."""
+    from dataclasses import fields
+
+    from rag_mcp.config import Config
+
+    names = [f.name for f in fields(Config)]
+    assert names[-3:] == ["embedding_device", "hybrid_dense_candidates", "hybrid_sparse_candidates"]
+    assert names.index("render_dpi") < names.index("embedding_device")

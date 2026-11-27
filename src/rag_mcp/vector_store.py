@@ -347,6 +347,8 @@ class VectorStore:
         fusion: str = "rrf",
         fiscal_year: int | None = None,
         filters: Mapping[str, FilterValue] | None = None,
+        dense_candidates: int = 20,
+        sparse_candidates: int = 30,
     ) -> list[models.ScoredPoint]:
         qfilter = self._filter(fiscal_year, filters)
         sparse_q = (
@@ -371,9 +373,9 @@ class VectorStore:
             fusion_kind = models.Fusion.DBSF if fusion == "dbsf" else models.Fusion.RRF
             prefetch = []
             if dense_vec is not None:
-                prefetch.append(models.Prefetch(query=dense_vec, using="dense", limit=max(20, top_k), filter=qfilter))
+                prefetch.append(models.Prefetch(query=dense_vec, using="dense", limit=max(dense_candidates, top_k), filter=qfilter))
             if sparse_q is not None:
-                prefetch.append(models.Prefetch(query=sparse_q, using="sparse", limit=max(30, top_k), filter=qfilter))
+                prefetch.append(models.Prefetch(query=sparse_q, using="sparse", limit=max(sparse_candidates, top_k), filter=qfilter))
             return self.client.query_points(
                 self.collection,
                 prefetch=prefetch,
@@ -430,6 +432,21 @@ class VectorStore:
                 self.collection, ids=[point_id_for(chunk_id)], with_payload=True
             )
         return recs[0] if recs else None
+
+    def retrieve_chunks(self, chunk_ids: list[str]) -> list:
+        """여러 chunk_id를 한 번에 조회. 없는 것은 빠지며 순서는 보장하지 않는다."""
+        if not chunk_ids:
+            return []
+        with self._lock:
+            if not self.client.collection_exists(self.collection):
+                return []
+            return list(
+                self.client.retrieve(
+                    self.collection,
+                    ids=[point_id_for(chunk_id) for chunk_id in chunk_ids],
+                    with_payload=True,
+                )
+            )
 
     def count_by_document(self, document_id: str) -> int:
         with self._lock:

@@ -21,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
         except (AttributeError, ValueError):
             pass
 
-    parser = argparse.ArgumentParser(prog="rag-mcp", description="회계·예산 지침서 RAG MCP")
+    parser = argparse.ArgumentParser(prog="rag-mcp", description="업무 지침서·편람 RAG MCP")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_ing = sub.add_parser("ingest", help="PDF 색인")

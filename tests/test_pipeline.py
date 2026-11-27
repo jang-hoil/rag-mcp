@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import glob
+import os
 from pathlib import Path
 
 import pytest
@@ -9,8 +10,9 @@ import pytest
 from rag_mcp.config import Config
 from rag_mcp.pipeline import parse_and_chunk
 
-DOC_ID = "예산편성_예산부서"
-PDF = "data/예산편성_예산부서.pdf"
+# 실제 샘플 문서는 저장소에 없다. 로컬 샘플로 돌리려면 RAG_TEST_SAMPLE_DOC 을 지정한다.
+DOC_ID = os.environ.get("RAG_TEST_SAMPLE_DOC", "sample_budget_doc")
+PDF = f"data/{DOC_ID}.pdf"
 
 
 @pytest.fixture

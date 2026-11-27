@@ -71,10 +71,12 @@ def test_ingest_and_list_documents(svc):
 def test_service_shares_backend_per_model(tmp_path, monkeypatch, fake_backend):
     created = []
 
-    def factory(model):
+    def factory(model, device):
+        assert device == "cpu"  # config.embedding_device 기본값이 전달된다
         created.append(model)
         return fake_backend
 
+    monkeypatch.delenv("RAG_EMBEDDING_DEVICE", raising=False)
     monkeypatch.setattr("rag_mcp.service.get_backend", factory)
     cfg = Config(data_dir=tmp_path, qdrant_path=tmp_path / "qdrant")
     svc = RagService(cfg)

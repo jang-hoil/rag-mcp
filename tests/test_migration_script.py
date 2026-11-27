@@ -41,7 +41,7 @@ def _record(document_id, point_id):
 
 def test_collect_target_records_reuses_vectors_and_skips_deleted_documents():
     keep = TARGET_DOCUMENTS[0]
-    discarded = "2025년_공직실무_윤리업무(온라인용)"
+    discarded = "문서 D"
     pages = [
         ([_record(keep, "keep-1"), _record(discarded, "drop-1")], "next"),
         ([_record(keep, "keep-2")], None),
@@ -59,9 +59,9 @@ def test_collect_target_records_reuses_vectors_and_skips_deleted_documents():
 
 def test_migration_constants_match_confirmed_document_counts():
     assert EXPECTED_COUNTS == {
-        "2026년 공직윤리 실무과정": 669,
-        "pas_public_audit_info_system_manual_v1_01_2023": 370,
-        "2025년_공직실무_재산등록(온라인용)": 38,
+        "문서 A": 669,
+        "문서 B": 370,
+        "문서 C": 38,
     }
 
 

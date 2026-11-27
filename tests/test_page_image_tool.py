@@ -36,7 +36,7 @@ def test_get_page_image_uses_cache_without_opening_pdf(
     tmp_path, fake_backend, monkeypatch
 ):
     """원본 PDF와 매니페스트가 없어도 남은 PNG 캐시만으로 이미지를 반환한다."""
-    from rag_mcp import service as service_module
+    from rag_mcp import page_images as page_images_module
 
     svc = _service(tmp_path, fake_backend)
     cached = svc.config.pages_dir("공직윤리") / "p11.png"
@@ -45,7 +45,7 @@ def test_get_page_image_uses_cache_without_opening_pdf(
     def should_not_render(*args, **kwargs):
         raise AssertionError("캐시가 있으면 PDF 렌더러를 호출하면 안 됩니다")
 
-    monkeypatch.setattr(service_module, "render_pages", should_not_render)
+    monkeypatch.setattr(page_images_module, "render_pages", should_not_render)
 
     result = svc.get_page_image("공직윤리", 11)
 
@@ -65,7 +65,7 @@ def test_get_page_image_renders_only_missing_pages_with_requested_dpi(
     tmp_path, fake_backend, monkeypatch
 ):
     """캐시된 쪽은 보존하고 빠진 쪽만 manifest PDF에서 지정 DPI로 렌더한다."""
-    from rag_mcp import service as service_module
+    from rag_mcp import page_images as page_images_module
 
     svc = _service(tmp_path, fake_backend, max_width=1600)
     document_id = "예산지침"
@@ -86,7 +86,7 @@ def test_get_page_image_renders_only_missing_pages_with_requested_dpi(
         _write_png(rendered, width=600, height=900)
         return {3: str(rendered)}
 
-    monkeypatch.setattr(service_module, "render_pages", fake_render)
+    monkeypatch.setattr(page_images_module, "render_pages", fake_render)
 
     result = svc.get_page_image(document_id, [2, 3], dpi=120)
 
@@ -99,8 +99,8 @@ def test_get_page_image_renders_only_missing_pages_with_requested_dpi(
 def test_get_page_image_uses_readable_low_dpi_default(
     tmp_path, fake_backend, monkeypatch
 ):
-    """dpi 미지정 시 색인용 200dpi보다 낮은 화면 확인용 144dpi를 사용한다."""
-    from rag_mcp import service as service_module
+    """dpi 미지정 시 config.page_image_dpi(이 테스트에선 144)를 사용한다."""
+    from rag_mcp import page_images as page_images_module
 
     svc = _service(tmp_path, fake_backend)
     document_id = "문서"
@@ -115,7 +115,7 @@ def test_get_page_image_uses_readable_low_dpi_default(
         _write_png(output)
         return {1: str(output)}
 
-    monkeypatch.setattr(service_module, "render_pages", fake_render)
+    monkeypatch.setattr(page_images_module, "render_pages", fake_render)
 
     svc.get_page_image(document_id, 1)
 

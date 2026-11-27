@@ -1,6 +1,6 @@
 # RAG MCP — Claude Desktop 연동 가이드
 
-회계·예산 지침서 RAG 서버를 **Claude Desktop**(및 동일 방식의 MCP 클라이언트)에
+업무 지침서·편람(회계·예산, 민방위, 징계, 감사, 공중보건의 등) RAG 서버를 **Claude Desktop**(및 동일 방식의 MCP 클라이언트)에
 stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰이크로 검증됨
 (`initialize` → `tools/list` 11개 → `collection_status` 정상 반환 확인).
 
@@ -84,7 +84,7 @@ stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰�
 | `get_page_image` | 원본 페이지를 **실제 이미지(PNG)** 로 반환. 한 번에 최대 5쪽. 이미 렌더된 페이지는 캐시에서 꺼내므로 원본 PDF가 없어도 된다 |
 | `ingest_pdf` | PDF 색인을 **백그라운드로 시작**하고 즉시 `job_id` 반환(비블로킹) |
 | `ingest_status` | `ingest_pdf`가 준 `job_id`로 진행 상태 조회(`running`/`done`/`error`) |
-| `get_chunk` | `chunk_id` 단건 조회 |
+| `get_chunk` | `chunk_id` 단건 조회. `neighbors=N`(0~5)이면 앞뒤 N개 청크를 `before`/`after`로 함께 반환 |
 | `list_documents` | 색인된 문서 목록(연도·청크수·상태) |
 | `delete_document` | 문서 삭제(`confirm=True`만 실제 실행) |
 | `reindex_document` | 재색인(기본 `reparse=False`로 parsed 재사용) |
@@ -102,8 +102,10 @@ stdio 방식으로 등록하는 절차. 아래 내용은 실제 stdio 핸드셰�
 3. 같은 `RAG_DATA_DIR`를 사용하는 MCP·CLI 전체에서 쓰기 작업을 **1개만** 허용한다.
    server 모드의 별도 프로세스가 같은 문서를 동시에 요청해도 후발 요청은 `status="busy"`로
    즉시 반환된다. 자동 대기열은 없으므로 먼저 시작한 작업이 끝난 뒤 다시 요청한다.
-4. job 상태는 인메모리 → 서버 재시작 시 사라지지만, 색인 결과 자체는 manifest에
-   영구 저장되므로 `list_documents`로 최종 결과를 확인할 수 있다.
+4. job 상태는 인메모리지만 **마지막 job 1건**은 `data/jobs/last_ingest_job.json`에 남아
+   서버 재시작 후에도 `ingest_status`로 조회된다(진행 중에 꺼졌다면 '중단됨'으로 보고).
+   그 이전 job은 사라지지만 색인 결과 자체는 manifest에 영구 저장되므로 `list_documents`로
+   최종 결과를 확인할 수 있다.
 
 `ingest_pdf`는 전달한 PDF를 매번 새로 파싱한 뒤 색인한다. 색인 중에는 다른 변경 작업
 (`ingest_pdf`, `ingest_chunks`, `delete_document`, `reindex_document`, `set_source_path`)이 실행되지 않고
@@ -148,7 +150,7 @@ Invoke-RestMethod 'http://127.0.0.1:6333/healthz'
 
 ```powershell
 uv run python scripts/migrate_local_to_server.py `
-  --source-path 'D:\User\Desktop\rag mcp\data\qdrant' `
+  --source-path '<프로젝트 경로>\data\qdrant' `
   --server-storage-path 'D:\qdrant\storage' `
   --target-url 'http://127.0.0.1:6333'
 ```
@@ -163,7 +165,7 @@ server 모드에서는 local에서 무시되던 sparse IDF가 실제 적용되�
 
 ```powershell
 uv run python scripts/migrate_local_to_server.py `
-  --source-path 'D:\User\Desktop\rag mcp\data\qdrant' `
+  --source-path '<프로젝트 경로>\data\qdrant' `
   --server-storage-path 'D:\qdrant\storage' `
   --target-url 'http://127.0.0.1:6333' `
   --apply
@@ -202,9 +204,9 @@ Codex와 Claude 설정의 타임스탬프 백업을 복원하고 `RAG_QDRANT_MOD
 - HTTP 서버 이관 결과: 컬렉션 6개, 총 2,280포인트
   (`1,064 + 38 + 669 + 370 + 75 + 64`). 전 포인트의 ID, payload, dense/sparse 벡터를
   local 원본과 대조했다.
-- Codex 설정 백업: `C:\Users\User\.codex\config.toml.bak-qdrant-20260903-151303`.
+- Codex 설정 백업: `<사용자 프로필>\.codex\config.toml.bak-qdrant-<시각>`.
 - Microsoft Store판 Claude 설정 백업:
-  `C:\Users\User\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json.bak-qdrant-20260903-192013`.
+  `<사용자 프로필>\AppData\Local\Packages\<Claude 패키지 폴더>\LocalCache\Roaming\Claude\claude_desktop_config.json.bak-qdrant-<시각>`.
 - `rag-mcp-qdrant` 중지·재시작 후 컬렉션 수가 유지됐고, 중복 시작 요청에도
   `qdrant.exe`는 1개만 실행됐다.
 - 기본 테스트 241 passed/9 skipped, gated stdio 테스트 4 passed. 독립 stdio MCP 2개가
