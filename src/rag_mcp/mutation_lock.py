@@ -99,20 +99,6 @@ class MutationGuard:
             }
             return token, None
 
-    def held_by_other_process(self) -> bool:
-        """다른 프로세스(또는 같은 프로세스의 다른 인스턴스)가 쓰기 잠금을 쥐고 있는가.
-
-        이 가드가 직접 쥐고 있으면 다른 쪽은 쥘 수 없으므로 False. 아니면 잠금을 잠깐
-        잡아 보고 곧바로 놓는다(그 짧은 사이 다른 쪽 reserve는 busy를 볼 수 있다).
-        """
-        with self._state_lock:
-            if self.active is not None:
-                return False
-            if not self._lock.try_acquire():
-                return True
-            self._lock.release()
-            return False
-
     def attach_job_id(self, token: str, job_id: str) -> None:
         with self._state_lock:
             if self.active and self.active["token"] == token:

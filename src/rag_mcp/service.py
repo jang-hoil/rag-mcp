@@ -109,10 +109,8 @@ class RagService:
         # 비동기 job 추적과 같은 데이터 폴더의 MCP/CLI 전체 쓰기 1개 제한.
         self._submit_lock = threading.Lock()
         self._mutations = MutationGuard(self.config.data_dir)
-        self.jobs = JobStore(
-            self.config.data_dir / "jobs" / "last_ingest_job.json",
-            owner_alive=self._mutations.held_by_other_process,
-        )
+        # 마지막 job 1건은 디스크에 남는다. 다른 인스턴스의 job은 소유 프로세스 생존으로 판정한다.
+        self.jobs = JobStore(self.config.data_dir / "jobs" / "last_ingest_job.json")
         # retriever/indexer 캐시 빌드 보호. 백그라운드 ingest 스레드와 메인 검색 스레드가
         # 같은 모델의 VectorStore(Qdrant local client)를 동시에 두 개 열어 파일락이 충돌하는 것을 막는다.
         # _indexer가 락을 쥔 채 _retriever를 재호출하므로 재진입 가능한 RLock을 쓴다.
@@ -696,7 +694,9 @@ class RagService:
 
         try:
             threading.Thread(target=_run, name=f"ingest-{doc_id}", daemon=True).start()
-        except Exception:
+        except Exception as e:
+            # 스레드를 못 띄우면 색인은 시작조차 안 됐다 — running으로 남기지 말고 이유를 기록한다.
+            self.jobs.fail(job.job_id, f"색인 작업 시작 실패 — {type(e).__name__}: {e}")
             self._release_mutation(token)
             raise
         # 안내(쪽수·예상 소요시간)는 스레드를 띄운 뒤 만든다 — 쪽수 읽기가 색인 시작을 늦추지 않게.

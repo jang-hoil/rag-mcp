@@ -1,5 +1,10 @@
 """마지막 색인 job 1건이 재시작(새 JobStore) 후에도 ingest_status로 조회되는지 (리포트 #14)."""
-from rag_mcp.jobs import JobStore
+from rag_mcp.jobs import OWNER_DEAD, JobStore
+
+
+def _dead_owner(_pid, _token):
+    """같은 프로세스 안에서 '소유 프로세스가 죽은 뒤 재시작'을 흉내 낸다."""
+    return OWNER_DEAD
 
 
 def test_finished_job_survives_restart(tmp_path):
@@ -20,7 +25,7 @@ def test_running_job_reports_interrupted_after_restart(tmp_path):
     path = tmp_path / "last.json"
     job = JobStore(path).create(document_id="d1")
 
-    restored = JobStore(path).get(job.job_id)
+    restored = JobStore(path, owner_state=_dead_owner).get(job.job_id)
 
     assert restored.status == "error"
     assert "중단" in restored.error
@@ -76,7 +81,7 @@ def test_interrupted_job_keeps_last_progress_and_elapsed(tmp_path, monkeypatch):
     store.progress(job.job_id, jobs_mod.STAGE_EMBEDDING, 75, 100)  # 단계 전환 → 즉시 기록
     clock[0] = 5000.0  # 한참 뒤 재시작
 
-    restored = JobStore(path, owner_alive=lambda: False).get(job.job_id)
+    restored = JobStore(path, owner_state=_dead_owner).get(job.job_id)
 
     assert restored.status == "error"
     assert (restored.processed, restored.total) == (75, 100)
@@ -105,34 +110,3 @@ def test_non_object_state_file_is_ignored(tmp_path):
     path = tmp_path / "last.json"
     path.write_text("[]", encoding="utf-8")
     assert JobStore(path).get("아무거나") is None
-
-
-def test_running_job_of_live_other_instance_is_not_marked_failed(tmp_path, fake_backend):
-    """다른 인스턴스가 쓰기 잠금을 쥐고 색인 중이면 그 job은 running 그대로 보인다."""
-    from rag_mcp import jobs as jobs_mod
-    from rag_mcp.config import Config
-    from rag_mcp.service import RagService
-
-    cfg = Config(data_dir=tmp_path, qdrant_path=tmp_path / "qdrant")
-    owner = RagService(cfg, backend=fake_backend)
-    other = RagService(cfg, backend=fake_backend)
-    token, busy = owner._reserve_mutation("ingest_pdf")
-    assert busy is None
-    try:
-        job = owner.jobs.create("d1")
-        owner.jobs.progress(job.job_id, jobs_mod.STAGE_EMBEDDING, 75, 100)
-
-        assert owner.ingest_status(job.job_id)["status"] == "running"
-        seen = other.ingest_status(job.job_id)
-        assert seen["ok"] is True and seen["status"] == "running"
-        assert (seen["processed"], seen["total"]) == (75, 100)
-    finally:
-        owner._release_mutation(token)
-
-    # 소유자가 잠금을 놓은 뒤(=죽은 것과 같은 상태)에는 중단으로 판정한다.
-    after = other.ingest_status(job.job_id)
-    assert after["status"] == "error" and "중단" in after["error"]
-    # 탐침이 잠금을 남기지 않는다.
-    token2, busy2 = other._reserve_mutation("ingest_pdf")
-    assert busy2 is None
-    other._release_mutation(token2)
