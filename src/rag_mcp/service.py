@@ -36,7 +36,7 @@ _LEGACY_COLLECTIONS = frozenset(COLLECTION_BY_MODEL.values())
 # 파일명에서만 4자리 연도를 자명하게 추출(PDF 내용은 열지 않음). review_before_ingest 전용.
 _FILENAME_YEAR_RE = re.compile(r"(?:19|20)\d{2}")
 
-# 색인 소요시간 추정 계수. 실측(2026-07-30, 칠곡군 타당성검토 340쪽/1,064청크):
+# 색인 소요시간 추정 계수. 실측(2026-07-30, 문서 G 340쪽/1,064청크):
 # 파싱 시작 17:13:33 → manifest done 17:31:00 = 약 17.5분 ≈ 쪽당 3.1초.
 # 기계·PDF 성격에 따라 흔들리므로 "대략"으로만 쓰고 확정 수치처럼 제시하지 않는다.
 _SECONDS_PER_PAGE = 3.0

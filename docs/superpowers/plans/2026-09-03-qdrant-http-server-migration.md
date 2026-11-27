@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Preserve `D:\User\Desktop\rag mcp\data\qdrant` and create a timestamped backup before migration.
+- Preserve `<프로젝트 경로>\data\qdrant` and create a timestamped backup before migration.
 - Never copy the local Qdrant directory into `D:\qdrant\storage`; transfer records through the client APIs.
 - Dry-run is the default; writes require `--apply`.
 - Preserve point IDs, dense and sparse vectors, payloads, vector schema, and collection names without re-embedding.
@@ -257,7 +257,7 @@ Include the migration command:
 
 ```powershell
 uv run python scripts/migrate_local_to_server.py `
-  --source-path 'D:\User\Desktop\rag mcp\data\qdrant' `
+  --source-path '<프로젝트 경로>\data\qdrant' `
   --server-storage-path 'D:\qdrant\storage' `
   --target-url 'http://127.0.0.1:6333'
 ```
@@ -328,7 +328,7 @@ running. Start and stop the task once, then verify only one `qdrant.exe` process
 ### Task 5: Back up and migrate the live collections
 
 **Files outside Git:**
-- Create at execution time: `D:\User\Desktop\rag mcp\data\qdrant.bak-$(Get-Date -Format yyyyMMdd-HHmmss)`
+- Create at execution time: `<프로젝트 경로>\data\qdrant.bak-$(Get-Date -Format yyyyMMdd-HHmmss)`
 - Write through HTTP: `D:\qdrant\storage`
 
 - [ ] **Step 1: Stop only verified RAG MCP process trees**
@@ -337,7 +337,7 @@ Resolve exact `rag-mcp.exe serve` parent and child PIDs with `Get-CimInstance Wi
 
 - [ ] **Step 2: Create and verify the backup**
 
-Resolve the source and backup absolute paths and confirm both remain under `D:\User\Desktop\rag mcp\data`. Copy the complete local store, including `meta.json` and `collection\*`. Compare recursive file count and total bytes between source and backup.
+Resolve the source and backup absolute paths and confirm both remain under `<프로젝트 경로>\data`. Copy the complete local store, including `meta.json` and `collection\*`. Compare recursive file count and total bytes between source and backup.
 
 - [ ] **Step 3: Run dry-run**
 
@@ -352,7 +352,7 @@ Run the same command with `--apply`. Query Qdrant HTTP for its collection list a
 ### Task 6: Switch Codex, Claude, and CLI configuration
 
 **Files outside Git:**
-- Modify with timestamped backup: `C:\Users\User\.codex\config.toml`
+- Modify with timestamped backup: `<사용자 프로필>\.codex\config.toml`
 - Modify with timestamped backup: `%APPDATA%\Claude\claude_desktop_config.json`
 - Modify: current user's `RAG_QDRANT_MODE` and `RAG_QDRANT_URL` environment variables
 

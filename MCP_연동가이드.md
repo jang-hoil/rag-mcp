@@ -150,7 +150,7 @@ Invoke-RestMethod 'http://127.0.0.1:6333/healthz'
 
 ```powershell
 uv run python scripts/migrate_local_to_server.py `
-  --source-path 'D:\User\Desktop\rag mcp\data\qdrant' `
+  --source-path '<프로젝트 경로>\data\qdrant' `
   --server-storage-path 'D:\qdrant\storage' `
   --target-url 'http://127.0.0.1:6333'
 ```
@@ -165,7 +165,7 @@ server 모드에서는 local에서 무시되던 sparse IDF가 실제 적용되�
 
 ```powershell
 uv run python scripts/migrate_local_to_server.py `
-  --source-path 'D:\User\Desktop\rag mcp\data\qdrant' `
+  --source-path '<프로젝트 경로>\data\qdrant' `
   --server-storage-path 'D:\qdrant\storage' `
   --target-url 'http://127.0.0.1:6333' `
   --apply
@@ -204,9 +204,9 @@ Codex와 Claude 설정의 타임스탬프 백업을 복원하고 `RAG_QDRANT_MOD
 - HTTP 서버 이관 결과: 컬렉션 6개, 총 2,280포인트
   (`1,064 + 38 + 669 + 370 + 75 + 64`). 전 포인트의 ID, payload, dense/sparse 벡터를
   local 원본과 대조했다.
-- Codex 설정 백업: `C:\Users\User\.codex\config.toml.bak-qdrant-20260903-151303`.
+- Codex 설정 백업: `<사용자 프로필>\.codex\config.toml.bak-qdrant-<시각>`.
 - Microsoft Store판 Claude 설정 백업:
-  `C:\Users\User\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json.bak-qdrant-20260903-192013`.
+  `<사용자 프로필>\AppData\Local\Packages\<Claude 패키지 폴더>\LocalCache\Roaming\Claude\claude_desktop_config.json.bak-qdrant-<시각>`.
 - `rag-mcp-qdrant` 중지·재시작 후 컬렉션 수가 유지됐고, 중복 시작 요청에도
   `qdrant.exe`는 1개만 실행됐다.
 - 기본 테스트 241 passed/9 skipped, gated stdio 테스트 4 passed. 독립 stdio MCP 2개가

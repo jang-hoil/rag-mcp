@@ -14,7 +14,7 @@ stdio 프로세스를 유지하되, 두 프로세스가 `http://127.0.0.1:6333`�
 
 - RAG MCP는 MCP Python SDK v2의 `MCPServer`를 사용하지만 transport는 stdio다.
 - `RAG_QDRANT_MODE` 기본값은 `local`이며 현재 실행 설정도 local이다.
-- local 저장소는 `D:\User\Desktop\rag mcp\data\qdrant`이고 한 프로세스만 열 수 있다.
+- local 저장소는 `<프로젝트 경로>\data\qdrant`이고 한 프로세스만 열 수 있다.
 - `open_qdrant_client()`는 이미 `RAG_QDRANT_MODE=server`와 `RAG_QDRANT_URL`을 지원한다.
 - `D:\qdrant`에는 아직 Qdrant 서버가 설치되어 있지 않다.
 - Python `qdrant-client` 잠금 버전은 1.18.0이다.
@@ -130,7 +130,7 @@ Qdrant 서버는 현재 `qdrant-client`와 호환되는 공식 Windows 릴리스
 3. 실제 MCP `initialize`와 `tools/list`에서 11개 도구가 노출된다.
 4. Codex용과 Claude용 두 개의 독립 stdio MCP 프로세스를 동시에 연결한다.
 5. 양쪽에서 `list_documents`와 `collection_status`가 같은 결과를 반환한다.
-6. 양쪽에서 기존 회귀 질의인 “칠곡군 타당성검토에서 수지개선 효과”를 검색해 관련 근거와
+6. 양쪽에서 기존 회귀 질의인 “문서 G에서 수지개선 효과”를 검색해 관련 근거와
    동일한 상위 chunk 순서가 반환되는지 확인한다. server 모드에서는 sparse IDF가 실제 적용되어
    local 모드와 순위 및 상위 금액이 달라질 수 있다.
 7. 한쪽 프로세스가 실행 중일 때 다른 프로세스도 파일락 없이 검색할 수 있어야 한다.

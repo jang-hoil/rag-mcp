@@ -18,19 +18,20 @@ from rag_mcp.vector_store import open_qdrant_client
 
 
 SOURCE_COLLECTION = "rag_kure_chunks"
+# 공개 저장소용으로 실제 문서 ID를 "문서 A~E"로 가렸다. 실제 이관 시 운영 문서 ID로 바꿔 쓴다.
 TARGET_DOCUMENTS = (
-    "2026년 공직윤리 실무과정",
-    "pas_public_audit_info_system_manual_v1_01_2023",
-    "2025년_공직실무_재산등록(온라인용)",
+    "문서 A",
+    "문서 B",
+    "문서 C",
 )
 EXPECTED_COUNTS = {
-    "2026년 공직윤리 실무과정": 669,
-    "pas_public_audit_info_system_manual_v1_01_2023": 370,
-    "2025년_공직실무_재산등록(온라인용)": 38,
+    "문서 A": 669,
+    "문서 B": 370,
+    "문서 C": 38,
 }
 DISCARDED_DOCUMENTS = {
-    "2025년_공직실무_윤리업무(온라인용)": 101,
-    "칠곡군청_2026 통합회계실무교재": 857,
+    "문서 D": 101,
+    "문서 E": 857,
 }
 _BATCH_SIZE = 128
 

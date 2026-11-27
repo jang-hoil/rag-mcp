@@ -1,6 +1,8 @@
 """chunking 단위 테스트 — 합성 블록 + parsed 산출물 통합."""
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from rag_mcp.chunking import (
@@ -19,8 +21,9 @@ from rag_mcp.table_chunking import (
     table_grid_text,
 )
 
-DOC_ID = "예산편성_예산부서"
-PDF = "data/예산편성_예산부서.pdf"
+# 실제 샘플 문서는 저장소에 없다. 로컬 샘플로 돌리려면 RAG_TEST_SAMPLE_DOC 을 지정한다.
+DOC_ID = os.environ.get("RAG_TEST_SAMPLE_DOC", "sample_budget_doc")
+PDF = f"data/{DOC_ID}.pdf"
 
 
 def _table(rows: int, cols: int, cells: list[tuple[int, int, str]], page: int = 1) -> dict:
