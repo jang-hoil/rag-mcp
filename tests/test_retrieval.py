@@ -267,3 +267,33 @@ def test_retriever_builds_reranker_once_and_rebuilds_on_config_change(
     config.rerank_lexical_weight = 1.5
     retriever.search("설정 변경 뒤 질의")
     assert built_keys == [("lexical", 1.0), ("lexical", 1.5)]
+
+
+def test_lexical_rerank_and_matched_by_analyze_each_text_once(fake_backend, monkeypatch):
+    """리랭커가 분석한 본문 토큰을 matched_by가 재사용한다(같은 본문 형태소 분석 1회)."""
+    from rag_mcp import tokenizer as tokenizer_mod
+
+    tokenizer_mod._tokenize_cached.cache_clear()
+    analyzed: list[str] = []
+    real = tokenizer_mod._kiwi_tokens
+    monkeypatch.setattr(
+        tokenizer_mod, "_kiwi_tokens", lambda text: analyzed.append(text) or real(text)
+    )
+    body = "명시이월 요건과 절차 설명 문단"
+    points = [
+        ScoredPoint(
+            id=1, version=0, score=0.5,
+            payload={"chunk_id": "d1::c0", "document_id": "d1", "text": body},
+        )
+    ]
+    retriever = Retriever(
+        Config(reranker="lexical"),
+        document_id="d1",
+        backend=fake_backend,
+        store=_ThresholdStore(points, {1: 0.8}),
+    )
+
+    outcome = retriever.search_with_diagnostics("명시이월 절차", top_k=1, search_mode="hybrid")
+
+    assert outcome.results[0].matched_by == ["dense", "sparse"]
+    assert analyzed.count(body) == 1
